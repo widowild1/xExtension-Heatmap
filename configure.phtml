@@ -1,7 +1,7 @@
 <?php
-if (method_exists($this, 'registerTranslates')) {
-    $this->registerTranslates();
+if (method_exists($this, 'registerTranslates')) {$this->registerTranslates();
 }
+$current_unit = FreshRSS_Context::$user_conf->heatmap_unit ?? 'F';
 ?>
 <form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
     <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
@@ -34,6 +34,16 @@ if (method_exists($this, 'registerTranslates')) {
                 <input type="checkbox" name="enable_reddit" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_reddit ?? true) ? 'checked="checked"' : ''; ?> />
                 <?php echo _t('ext.heatmap.enable_reddit'); ?>
             </label>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="temp_unit"><?php echo _t('ext.heatmap.temp_unit'); ?></label>
+        <div class="group-controls">
+            <select name="temp_unit" id="temp_unit" style="width: 200px;">
+                <option value="C" <?php echo $current_unit === 'C' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.heatmap.temp_celsius'); ?></option>
+                <option value="F" <?php echo $current_unit === 'F' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.heatmap.temp_fahrenheit'); ?></option>
+            </select>
         </div>
     </div>
 
