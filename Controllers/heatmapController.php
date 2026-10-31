@@ -224,7 +224,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		return $results;
 	}
 
-	// Méthode réutilisable (appelable par AJAX ou par le hook cron)
 	public function calculateAndStoreScore(string $rawUrl, string $rawTitle, int $pubdate, bool $force = false): array {
 		$url = $this->cleanUrl($rawUrl);
 		$cleanTitle = trim(preg_replace('/["\r\n\t]+/', ' ', strip_tags(html_entity_decode($rawTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
@@ -310,7 +309,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			'discussion_url' => ''
 		];
 
-		// Requêtes Vague 1
 		$requests = [];
 		$headers = [];
 		
@@ -357,7 +355,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 
 		$responses = $this->fetchUrlsMulti($requests, $timeout, $headers);
 
-		// Vague 2 : Repli par Titre
 		$fallbackRequests = [];
 		$hnData = !empty($responses['hn']) ? json_decode($responses['hn'], true) : null;
 		if ($enableHN && empty($hnData['hits']) && !empty($cleanTitle)) {
@@ -392,11 +389,9 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// Détection du lien de discussion le plus populaire
 		$topDiscussionUrl = '';
 		$topDiscussionPoints = 0;
 
-		// 1. Hacker News
 		if (isset($hnData['hits']) && is_array($hnData['hits'])) {
 			$hnHits = $hnData['hits'];
 			usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
@@ -416,7 +411,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 2. Reddit
 		if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
 			$subreddits = [];
 			foreach ($redditData['data']['children'] as $post) {
@@ -438,7 +432,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 3. SearXNG
 		if ($enableSearx && !empty($responses['searxng'])) {
 			$searxData = json_decode($responses['searxng'], true);
 			if (isset($searxData['results']) && is_array($searxData['results'])) {
@@ -462,7 +455,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 4. Hister
 		if ($enableHister && !empty($responses['hister'])) {
 			$histerData = json_decode($responses['hister'], true);
 			$hResults = $histerData['results'] ?? $histerData['documents'] ?? (is_array($histerData) ? $histerData : []);
@@ -473,7 +465,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 5. Bluesky
 		if (isset($bskyData['posts']) && is_array($bskyData['posts'])) {
 			$totalEngage = 0;
 			foreach ($bskyData['posts'] as $post) {
@@ -499,7 +490,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 6. Wikipédia
 		if ($enableWikipedia) {
 			$citations = 0;
 			if (!empty($responses['wikipedia_fr'])) {
@@ -516,7 +506,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 7. Lobste.rs
 		if (is_array($lobstersData) && !empty($lobstersData)) {
 			$weight = 0;
 			foreach ($lobstersData as $story) {
@@ -533,7 +522,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 8. Lemmy
 		if ($enableLemmy && !empty($responses['lemmy'])) {
 			$lemmyData = json_decode($responses['lemmy'], true);
 			if (isset($lemmyData['posts']) && is_array($lemmyData['posts'])) {
@@ -550,7 +538,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 9. Wayback Machine
 		if ($enableWayback && !empty($responses['wayback'])) {
 			$wbData = json_decode($responses['wayback'], true);
 			if (!empty($wbData['archived_snapshots']['closest']['available'])) {
@@ -559,7 +546,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 		}
 
-		// 10. GitHub
 		if ($enableGithub && !empty($responses['github'])) {
 			$ghData = json_decode($responses['github'], true);
 			$ghCount = intval($ghData['total_count'] ?? 0);
@@ -583,6 +569,11 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 	}
 
 	public function scoreAction(): void {
+		if (!FreshRSS_Auth::hasAccess()) {
+			Minz_Error::error(403);
+			return;
+		}
+		
 		$this->view->_layout(false);
 		header('Content-Type: application/json');
 		
