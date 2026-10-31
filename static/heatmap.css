@@ -1,43 +1,114 @@
+/* Base commune des badges */
 .ext-heatmap-badge {
-    font-size: 0.9em;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background-color: #f0f0f0;
-    color: #333;
-    margin-right: 8px;
     display: inline-block;
-    transition: all 0.3s ease;
+    vertical-align: middle;
+    font-size: 0.82em;
+    font-weight: 600;
+    line-height: 1.3;
+    padding: 2px 8px;
+    margin-right: 8px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-style: solid;
+    transition: transform 0.15s ease, opacity 0.15s ease;
     cursor: pointer;
+    user-select: none;
+    text-decoration: none !important;
+    white-space: nowrap;
 }
 
-.ext-heatmap-cold { background-color: #e0f7fa; border: 1px solid #b2ebf2; }
-.ext-heatmap-warm { background-color: #fff9c4; border: 1px solid #fff59d; }
-.ext-heatmap-hot { background-color: #ffe0b2; border: 1px solid #ffcc80; }
-.ext-heatmap-viral { background-color: #ffcdd2; border: 1px solid #ef9a9a; font-weight: bold; }
+.ext-heatmap-badge:hover {
+    transform: scale(1.05);
+    opacity: 0.95;
+}
 
+/* === MODE CLAIR (Texte sombre et contrasté sur fond pastel teinté) === */
+.ext-heatmap-cold {
+    background-color: #e0f2fe !important;
+    border-color: #7dd3fc !important;
+    color: #0369a1 !important; /* Bleu océan foncé */
+}
+
+.ext-heatmap-warm {
+    background-color: #fef3c7 !important;
+    border-color: #fcd34d !important;
+    color: #92400e !important; /* Brun ambré foncé */
+}
+
+.ext-heatmap-hot {
+    background-color: #ffedd5 !important;
+    border-color: #fdba74 !important;
+    color: #9a3412 !important; /* Rouille / orange foncé */
+}
+
+.ext-heatmap-viral {
+    background-color: #fee2e2 !important;
+    border-color: #fca5a5 !important;
+    color: #991b1b !important; /* Rouge grenat foncé */
+    font-weight: 700;
+}
+
+/* === MODE SOMBRE (Texte lumineux et net sur fond sombre saturé) === */
 @media (prefers-color-scheme: dark) {
-    .ext-heatmap-cold { background-color: rgba(0, 150, 136, 0.2); border: 1px solid rgba(0, 150, 136, 0.4); color: #e0f2f1; }
-    .ext-heatmap-warm { background-color: rgba(255, 235, 59, 0.2); border: 1px solid rgba(255, 235, 59, 0.4); color: #fff9c4; }
-    .ext-heatmap-hot { background-color: rgba(255, 152, 0, 0.2); border: 1px solid rgba(255, 152, 0, 0.4); color: #ffe0b2; }
-    .ext-heatmap-viral { background-color: rgba(244, 67, 54, 0.3); border: 1px solid rgba(244, 67, 54, 0.5); color: #ffcdd2; }
+    .ext-heatmap-cold {
+        background-color: #082f49 !important;
+        border-color: #0284c7 !important;
+        color: #7dd3fc !important; /* Bleu ciel lumineux */
+    }
+
+    .ext-heatmap-warm {
+        background-color: #451a03 !important;
+        border-color: #b45309 !important;
+        color: #fde68a !important; /* Jaune or lumineux */
+    }
+
+    .ext-heatmap-hot {
+        background-color: #431407 !important;
+        border-color: #ea580c !important;
+        color: #fdba74 !important; /* Pêche / orange lumineux */
+    }
+
+    .ext-heatmap-viral {
+        background-color: #450a0a !important;
+        border-color: #dc2626 !important;
+        color: #fca5a5 !important; /* Rouge clair lumineux */
+    }
 }
 
+/* Prise en charge des thèmes sombres natifs de FreshRSS */
 body.theme-dark .ext-heatmap-cold,
 html.dark .ext-heatmap-cold,
-.night-mode .ext-heatmap-cold { background-color: rgba(0, 150, 136, 0.2); border: 1px solid rgba(0, 150, 136, 0.4); color: #e0f2f1; }
+.night-mode .ext-heatmap-cold {
+    background-color: #082f49 !important;
+    border-color: #0284c7 !important;
+    color: #7dd3fc !important;
+}
 
 body.theme-dark .ext-heatmap-warm,
 html.dark .ext-heatmap-warm,
-.night-mode .ext-heatmap-warm { background-color: rgba(255, 235, 59, 0.2); border: 1px solid rgba(255, 235, 59, 0.4); color: #fff9c4; }
+.night-mode .ext-heatmap-warm {
+    background-color: #451a03 !important;
+    border-color: #b45309 !important;
+    color: #fde68a !important;
+}
 
 body.theme-dark .ext-heatmap-hot,
 html.dark .ext-heatmap-hot,
-.night-mode .ext-heatmap-hot { background-color: rgba(255, 152, 0, 0.2); border: 1px solid rgba(255, 152, 0, 0.4); color: #ffe0b2; }
+.night-mode .ext-heatmap-hot {
+    background-color: #431407 !important;
+    border-color: #ea580c !important;
+    color: #fdba74 !important;
+}
 
 body.theme-dark .ext-heatmap-viral,
 html.dark .ext-heatmap-viral,
-.night-mode .ext-heatmap-viral { background-color: rgba(244, 67, 54, 0.3); border: 1px solid rgba(244, 67, 54, 0.5); color: #ffcdd2; }
+.night-mode .ext-heatmap-viral {
+    background-color: #450a0a !important;
+    border-color: #dc2626 !important;
+    color: #fca5a5 !important;
+}
 
+/* Boutons intégrés dans la barre supérieure de FreshRSS */
 #ext-heatmap-sort-btn-nav,
 #ext-heatmap-filter-btn-nav {
     display: inline-block;
