@@ -1,5 +1,5 @@
 const processBadge = (badge, force = false) => {
-    if (badge.dataset.loaded && !force) return;
+    if (badge.dataset.loaded === 'true' && !force) return;
     badge.dataset.loaded = 'true';
     
     const url = badge.dataset.url;
@@ -10,7 +10,7 @@ const processBadge = (badge, force = false) => {
         return;
     }
 
-    badge.innerText = force ? '🌡️ Refetching...' : '🌡️ Fetching...';
+    badge.innerText = force ? '🌡️ ...' : '🌡️ ...';
 
     let fetchUrl = `?c=heatmap&a=score&url=${encodeURIComponent(url)}&pubdate=${pubdate}`;
     if (force) fetchUrl += '&force=1';
@@ -52,25 +52,43 @@ const updateBadgeUI = (badge, score, frozen) => {
 
     badge.className = `ext-heatmap-badge ${className}`;
     
-    // Add visual indicator if the score is frozen
     let text = `${emoji} ${score.toFixed(1)}°F`;
     if (frozen) {
-        text += ' 🛑'; // Indicates it's no longer automatically updating
+        text += ' 🛑';
     }
     
     badge.innerText = text;
 };
 
+// IntersectionObserver pour un lazy loading fluide
+let badgeObserver = null;
+if ('IntersectionObserver' in window) {
+    badgeObserver = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const badge = entry.target;
+                observer.unobserve(badge);
+                processBadge(badge);
+            }
+        });
+    }, { rootMargin: '200px 0px' });
+}
+
 const initBadges = () => {
-    const elements = document.querySelectorAll('.ext-heatmap-badge:not([data-loaded="true"])');
+    const elements = document.querySelectorAll('.ext-heatmap-badge:not([data-observed="true"])');
     if (elements.length > 0) {
         elements.forEach(badge => {
+            badge.dataset.observed = 'true';
             badge.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 processBadge(badge, true);
             };
-            processBadge(badge);
+            if (badgeObserver) {
+                badgeObserver.observe(badge);
+            } else {
+                processBadge(badge);
+            }
         });
     }
 };
@@ -100,13 +118,9 @@ const sortFeedsByHeat = () => {
         return scoreB - scoreA;
     });
     
-    // Hide date and transition dividers to remove empty gaps at the top
     document.querySelectorAll('.day, .transition').forEach(el => el.style.display = 'none');
     
-    // Ensure we don't push items below the footer (Load More button)
     const footer = parent.querySelector('.stream-footer');
-    
-    // Reorder DOM
     entries.forEach(entry => {
         if (footer) {
             parent.insertBefore(entry, footer);
@@ -116,7 +130,7 @@ const sortFeedsByHeat = () => {
     });
     
     const btn = document.getElementById('ext-heatmap-sort-btn');
-    if (btn) btn.innerText = '🔥 Sorted!';
+    if (btn) btn.innerText = '🔥 Trié !';
 };
 
 const addSortButton = () => {
@@ -124,18 +138,19 @@ const addSortButton = () => {
     
     const sortBtn = document.createElement('button');
     sortBtn.id = 'ext-heatmap-sort-btn';
-    sortBtn.innerText = '🔥 Sort by Heat';
+    sortBtn.innerText = '🔥 Trier par popularité';
     sortBtn.style.position = 'fixed';
     sortBtn.style.bottom = '20px';
     sortBtn.style.right = '20px';
     sortBtn.style.zIndex = '9999';
-    sortBtn.style.padding = '12px 18px';
-    sortBtn.style.borderRadius = '25px';
-    sortBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+    sortBtn.style.padding = '10px 16px';
+    sortBtn.style.borderRadius = '20px';
+    sortBtn.style.boxShadow = '0 3px 10px rgba(0,0,0,0.25)';
     sortBtn.style.background = '#ff4500';
     sortBtn.style.color = '#fff';
     sortBtn.style.border = 'none';
     sortBtn.style.fontWeight = 'bold';
+    sortBtn.style.fontSize = '13px';
     sortBtn.style.cursor = 'pointer';
     sortBtn.onclick = (e) => {
         e.preventDefault();
@@ -145,17 +160,14 @@ const addSortButton = () => {
     document.body.appendChild(sortBtn);
 };
 
-// Run immediately in case elements already exist
 initBadges();
 addSortButton();
 
-// Also run on DOMContentLoaded just in case
 document.addEventListener('DOMContentLoaded', () => {
     initBadges();
     addSortButton();
 });
 
-// Set up MutationObserver if body exists, otherwise wait
 const setupObserver = () => {
     if (!document.body) {
         setTimeout(setupObserver, 100);
