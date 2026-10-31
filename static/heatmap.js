@@ -188,44 +188,45 @@ const sortFeedsByHeat = () => {
     });
     
     const i18n = getI18n();
-    const btn = document.getElementById('ext-heatmap-sort-btn');
-    if (btn) btn.innerText = i18n.sorted;
+    const btnNav = document.getElementById('ext-heatmap-sort-btn-nav');
+    if (btnNav) btnNav.innerText = i18n.sorted;
 };
 
-const addSortButton = () => {
-    if (document.getElementById('ext-heatmap-sort-btn')) return;
+// Intégration du bouton dans la barre d'outils (nav_menu)
+const addSortButtonToNav = () => {
+    if (document.getElementById('ext-heatmap-sort-btn-nav')) return;
+    
+    const navMenu = document.querySelector('#nav_menu');
+    if (!navMenu) return; // Si la page n'a pas de menu (ex: paramètres)
     
     const i18n = getI18n();
-    const sortBtn = document.createElement('button');
-    sortBtn.id = 'ext-heatmap-sort-btn';
+    const sortLi = document.createElement('li');
+    sortLi.className = 'item';
+    
+    const sortBtn = document.createElement('a');
+    sortBtn.id = 'ext-heatmap-sort-btn-nav';
     sortBtn.innerText = i18n.sortByHeat;
-    sortBtn.style.position = 'fixed';
-    sortBtn.style.bottom = '20px';
-    sortBtn.style.right = '20px';
-    sortBtn.style.zIndex = '9999';
-    sortBtn.style.padding = '10px 16px';
-    sortBtn.style.borderRadius = '20px';
-    sortBtn.style.boxShadow = '0 3px 10px rgba(0,0,0,0.25)';
-    sortBtn.style.background = '#ff4500';
-    sortBtn.style.color = '#fff';
-    sortBtn.style.border = 'none';
-    sortBtn.style.fontWeight = 'bold';
-    sortBtn.style.fontSize = '13px';
-    sortBtn.style.cursor = 'pointer';
     sortBtn.onclick = (e) => {
         e.preventDefault();
         sortFeedsByHeat();
     };
 
-    document.body.appendChild(sortBtn);
+    sortLi.appendChild(sortBtn);
+    
+    const toggleViewBtn = navMenu.querySelector('.toggle_view');
+    if (toggleViewBtn) {
+        navMenu.insertBefore(sortLi, toggleViewBtn);
+    } else {
+        navMenu.appendChild(sortLi);
+    }
 };
 
 initBadges();
-addSortButton();
+addSortButtonToNav();
 
 document.addEventListener('DOMContentLoaded', () => {
     initBadges();
-    addSortButton();
+    addSortButtonToNav();
 });
 
 const setupObserver = () => {
@@ -233,7 +234,13 @@ const setupObserver = () => {
         setTimeout(setupObserver, 100);
         return;
     }
-    const observer = new MutationObserver(initBadges);
+    const observer = new MutationObserver((mutations) => {
+        initBadges();
+        // Vérifie si le menu de navigation a été recréé en AJAX par FreshRSS
+        if (!document.getElementById('ext-heatmap-sort-btn-nav') && document.querySelector('#nav_menu')) {
+            addSortButtonToNav();
+        }
+    });
     observer.observe(document.body, { childList: true, subtree: true });
 };
 setupObserver();
