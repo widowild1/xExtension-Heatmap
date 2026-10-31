@@ -1,0 +1,21 @@
+<?php
+
+return array(
+    'heatmap' => array(
+        'searxng_url' => 'SearXNG instance URL',
+        'searxng_help' => 'Address of your local or public SearXNG instance. Make sure JSON format is enabled in settings.yml.',
+        'active_sources' => 'Active popularity sources',
+        'enable_searxng' => 'Enable search via <strong>SearXNG</strong> (web mentions)',
+        'enable_hn' => 'Enable <strong>Hacker News</strong> (Algolia API)',
+        'enable_reddit' => 'Enable <strong>Reddit</strong> (public API)',
+        'timeout' => 'Network timeout (seconds)',
+        'timeout_help' => 'Maximum timeout per external request (default: 3s). A lower value prevents slowing down the server.',
+        'save' => 'Save settings',
+        'click_to_recalculate' => 'Click to recalculate',
+        'sort_by_heat' => '🔥 Sort by Heat',
+        'sorted' => '🔥 Sorted!',
+        'no_url' => '🌡️ No URL',
+        'err_data' => '🌡️ Err Data',
+        'err_fetch' => '🌡️ Err Fetch',
+    ),
+);
