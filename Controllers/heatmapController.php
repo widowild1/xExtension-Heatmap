@@ -157,7 +157,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			unset($params[$k]);
 		}
 		
-		$cleanUrl = $parsed['scheme'] . '://' . $parsed['host'];
+		$cleanUrl = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? '');
 		if (isset($parsed['port'])) $cleanUrl .= ':' . $parsed['port'];
 		if (isset($parsed['path'])) $cleanUrl .= $parsed['path'];
 		if (!empty($params)) $cleanUrl .= '?' . http_build_query($params);
@@ -182,11 +182,8 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 
 			$url = $this->cleanUrl($rawUrl);
-
-			// Nettoyage du titre pour la recherche
 			$cleanTitle = trim(preg_replace('/["\r\n\t]+/', ' ', strip_tags(html_entity_decode($rawTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
 
-			// Domaine d'origine de l'article pour filtrer les auto-citations
 			$originalHost = parse_url($url, PHP_URL_HOST);
 			if ($originalHost) {
 				$originalHost = strtolower(preg_replace('/^www\./', '', $originalHost));
@@ -239,6 +236,13 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			$enableHN = $userConf->heatmap_enable_hn ?? true;
 			$enableReddit = $userConf->heatmap_enable_reddit ?? true;
 			$enableSearx = $userConf->heatmap_enable_searxng ?? true;
+			$enableBsky = $userConf->heatmap_enable_bsky ?? true;
+			$enableWikipedia = $userConf->heatmap_enable_wikipedia ?? true;
+			$enableLobsters = $userConf->heatmap_enable_lobsters ?? true;
+			$enableLemmy = $userConf->heatmap_enable_lemmy ?? false;
+			$enableWayback = $userConf->heatmap_enable_wayback ?? true;
+			$enableGithub = $userConf->heatmap_enable_github ?? false;
+
 			$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
 			$timeout = intval($userConf->heatmap_timeout ?? 3);
 			if ($timeout < 1 || $timeout > 10) $timeout = 3;
@@ -250,19 +254,23 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			$details = [
 				'hn' => ['points' => 0, 'mentions' => 0],
 				'reddit' => ['ups' => 0, 'mentions' => 0],
-				'searxng' => ['sources' => 0]
+				'searxng' => ['sources' => 0],
+				'bsky' => ['reposts' => 0, 'likes' => 0],
+				'wikipedia' => ['citations' => 0],
+				'lobsters' => ['score' => 0, 'comments' => 0],
+				'lemmy' => ['score' => 0, 'comments' => 0],
+				'wayback' => ['archived' => false],
+				'github' => ['mentions' => 0],
 			];
 
-			// 1. Hacker News (URL, repli par Titre)
+			// 1. Hacker News
 			if ($enableHN) {
 				$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url", $timeout);
 				$hnData = $hnRaw ? json_decode($hnRaw, true) : null;
-				
 				if (empty($hnData['hits']) && !empty($cleanTitle)) {
 					$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query=" . urlencode($cleanTitle) . "&tags=story&hitsPerPage=3", $timeout);
 					$hnData = $hnRaw ? json_decode($hnRaw, true) : null;
 				}
-
 				if (isset($hnData['hits']) && is_array($hnData['hits'])) {
 					$hnHits = $hnData['hits'];
 					usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
@@ -272,24 +280,21 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 						if ($points > 0) {
 							$details['hn']['points'] += $points;
 							$details['hn']['mentions']++;
-							$post_score = log10($points + 10) * $scale;
-							$degrees += $post_score / pow(2, $weight);
+							$degrees += (log10($points + 10) * $scale) / pow(2, $weight);
 							$weight++;
 						}
 					}
 				}
 			}
 
-			// 2. Reddit (URL, repli par Titre)
+			// 2. Reddit
 			if ($enableReddit) {
 				$redditRaw = $this->fetchUrl("https://www.reddit.com/api/info.json?url={$encodedUrl}", $timeout);
 				$redditData = $redditRaw ? json_decode($redditRaw, true) : null;
-
 				if (empty($redditData['data']['children']) && !empty($cleanTitle)) {
 					$redditRaw = $this->fetchUrl("https://www.reddit.com/search.json?q=" . urlencode('"' . $cleanTitle . '"') . "&sort=relevance&limit=3", $timeout);
 					$redditData = $redditRaw ? json_decode($redditRaw, true) : null;
 				}
-
 				if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
 					$subreddits = [];
 					foreach ($redditData['data']['children'] as $post) {
@@ -302,19 +307,17 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 					foreach ($subreddits as $sub => $upsList) {
 						rsort($upsList);
 						foreach ($upsList as $weight => $ups) {
-							$post_score = log10($ups + 10) * $scale;
-							$degrees += $post_score / pow(2, $weight);
+							$degrees += (log10($ups + 10) * $scale) / pow(2, $weight);
 						}
 					}
 				}
 			}
 
-			// 3. SearXNG (Recherche ciblée par Titre exact)
+			// 3. SearXNG
 			if ($enableSearx && !empty($searxBaseUrl)) {
 				$query = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
 				$searxApiUrl = rtrim($searxBaseUrl, '/') . "/search?q=" . urlencode($query) . "&format=json";
 				$searxRaw = $this->fetchUrl($searxApiUrl, $timeout);
-				
 				if ($searxRaw) {
 					$searxData = json_decode($searxRaw, true);
 					if (isset($searxData['results']) && is_array($searxData['results'])) {
@@ -324,10 +327,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 							$host = parse_url($result['url'], PHP_URL_HOST);
 							if ($host) {
 								$host = strtolower(preg_replace('/^www\./', '', $host));
-								// Ignore le domaine source de l'article pour ne garder que les vraies mentions externes
-								if (!empty($originalHost) && $host === $originalHost) {
-									continue;
-								}
+								if (!empty($originalHost) && $host === $originalHost) continue;
 								$domains[$host][] = 1;
 							}
 						}
@@ -335,16 +335,111 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 							$details['searxng']['sources']++;
 							$credibility = $this->multipliers[$host] ?? 1.0;
 							foreach ($mentions as $weight => $val) {
-								$post_score = $scale * $credibility;
-								$degrees += $post_score / pow(2, $weight);
+								$degrees += ($scale * $credibility) / pow(2, $weight);
 							}
 						}
 					}
 				}
 			}
 
-			$finalScore = round($degrees, 1);
-			$this->setCache($url, $finalScore, $firstCheck, $details);
+			// 4. Bluesky (AT Protocol)
+			if ($enableBsky) {
+				$bskyUrl = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={$encodedUrl}&limit=25";
+				$bskyRaw = $this->fetchUrl($bskyUrl, $timeout);
+				$bskyData = $bskyRaw ? json_decode($bskyRaw, true) : null;
+				if (empty($bskyData['posts']) && !empty($cleanTitle)) {
+					$bskyRaw = $this->fetchUrl("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=" . urlencode('"' . $cleanTitle . '"') . "&limit=10", $timeout);
+					$bskyData = $bskyRaw ? json_decode($bskyRaw, true) : null;
+				}
+				if (isset($bskyData['posts']) && is_array($bskyData['posts'])) {
+					$totalEngage = 0;
+					foreach ($bskyData['posts'] as $post) {
+						$reposts = intval($post['repostCount'] ?? 0);
+						$likes = intval($post['likeCount'] ?? 0);
+						$replies = intval($post['replyCount'] ?? 0);
+						$details['bsky']['reposts'] += $reposts;
+						$details['bsky']['likes'] += $likes;
+						$totalEngage += ($reposts * 2) + $likes + $replies;
+					}
+					if ($totalEngage > 0) {
+						$degrees += log10($totalEngage + 10) * $scale;
+					}
+				}
+			}
+
+			// 5. Wikipédia (Références externes MediaWiki)
+			if ($enableWikipedia && !empty($originalHost)) {
+				$parsedUrl = parse_url($url);
+				$path = $parsedUrl['path'] ?? '';
+				$euquery = $originalHost . $path;
+				$wikiUrl = "https://fr.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
+				$wikiRaw = $this->fetchUrl($wikiUrl, $timeout);
+				$wikiData = $wikiRaw ? json_decode($wikiRaw, true) : null;
+				if (empty($wikiData['query']['exturlusage'])) {
+					$wikiUrl = "https://en.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
+					$wikiRaw = $this->fetchUrl($wikiUrl, $timeout);$wikiData = $wikiRaw ? json_decode($wikiRaw, true) : null;
+				}
+				if (!empty($wikiData['query']['exturlusage']) && is_array($wikiData['query']['exturlusage'])) {
+					$citations = count($wikiData['query']['exturlusage']);
+					$details['wikipedia']['citations'] =$citations;
+					$degrees += log10($citations + 10) *$scale * 2.0; // Bonus autorité
+				}
+			}
+
+			// 6. Lobste.rs
+			if ($enableLobsters) {$lobstersRaw = $this->fetchUrl("https://lobste.rs/search.json?q={$encodedUrl}&what=stories", $timeout);$lobstersData = $lobstersRaw ? json_decode($lobstersRaw, true) : null;
+				if (empty($lobstersData) && !empty($cleanTitle)) {$lobstersRaw = $this->fetchUrl("https://lobste.rs/search.json?q=" . urlencode($cleanTitle) . "&what=stories", $timeout);$lobstersData = $lobstersRaw ? json_decode($lobstersRaw, true) : null;
+				}
+				if (is_array($lobstersData) && !empty($lobstersData)) {$weight = 0;
+					foreach ($lobstersData as$story) {
+						$storyScore = intval($story['score'] ?? 0);
+						$commentCount = intval($story['comment_count'] ?? 0);
+						$details['lobsters']['score'] +=$storyScore;
+						$details['lobsters']['comments'] +=$commentCount;
+						$degrees += (log10($storyScore + $commentCount + 10) *$scale) / pow(2, $weight);$weight++;
+					}
+				}
+			}
+
+			// 7. Lemmy (Fédiverse)
+			if ($enableLemmy) {$lemmyRaw = $this->fetchUrl("https://lemmy.world/api/v3/post/list?sort=TopAll&page=1&limit=5&q={$encodedUrl}", $timeout);$lemmyData = $lemmyRaw ? json_decode($lemmyRaw, true) : null;
+				if (isset($lemmyData['posts']) && is_array($lemmyData['posts'])) {$weight = 0;
+					foreach ($lemmyData['posts'] as$postView) {
+						$counts =$postView['counts'] ?? [];
+						$lScore = intval($counts['score'] ?? 0);
+						$lComments = intval($counts['comments'] ?? 0);
+						$details['lemmy']['score'] +=$lScore;
+						$details['lemmy']['comments'] +=$lComments;
+						$degrees += (log10($lScore + $lComments + 10) *$scale) / pow(2, $weight);$weight++;
+					}
+				}
+			}
+
+			// 8. Wayback Machine (Archive.org)
+			if ($enableWayback) {
+				$waybackRaw =$this->fetchUrl("https://archive.org/wayback/available?url={$encodedUrl}", $timeout);
+				if ($waybackRaw) {
+					$wbData = json_decode($waybackRaw, true);
+					if (!empty($wbData['archived_snapshots']['closest']['available'])) {$details['wayback']['archived'] = true;
+						$degrees += 1.5; // Bonus pérennité
+					}
+				}
+			}
+
+			// 9. GitHub
+			if ($enableGithub) {
+				$ghRaw =$this->fetchUrl("https://api.github.com/search/issues?q={$encodedUrl}+in:body", $timeout);
+				if ($ghRaw) {
+					$ghData = json_decode($ghRaw, true);
+					$ghCount = intval($ghData['total_count'] ?? 0);
+					if ($ghCount > 0) {
+						$details['github']['mentions'] =$ghCount;
+						$degrees += log10($ghCount + 10) *$scale;
+					}
+				}
+			}
+
+			$finalScore = round($degrees, 1);$this->setCache($url,$finalScore, $firstCheck,$details);
 
 			echo json_encode([
 				'url' => $url,
