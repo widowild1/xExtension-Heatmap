@@ -86,20 +86,36 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     badge.innerText = text;
     
     if (details) {
-        let tip = '';
+        let lines = [];
         if (details.hn && details.hn.mentions > 0) {
-            tip += `HackerNews: ${details.hn.points} pts (${details.hn.mentions} mentions)\n`;
+            lines.push(`HackerNews: ${details.hn.points} pts (${details.hn.mentions} posts)`);
         }
         if (details.reddit && details.reddit.mentions > 0) {
-            tip += `Reddit: ${details.reddit.ups} upvotes (${details.reddit.mentions} posts)\n`;
+            lines.push(`Reddit: ${details.reddit.ups} upvotes (${details.reddit.mentions} posts)`);
         }
         if (details.searxng && details.searxng.sources > 0) {
-            tip += `SearXNG: ${details.searxng.sources} sources web\n`;
+            lines.push(`SearXNG: ${details.searxng.sources} sources web`);
         }
-        if (!tip) {
-            tip = 'Aucune mention externe trouvée pour le moment.';
+        if (details.bsky && (details.bsky.reposts > 0 || details.bsky.likes > 0)) {
+            lines.push(`Bluesky: ${details.bsky.reposts} reposts, ${details.bsky.likes} likes`);
         }
-        badge.setAttribute('title', tip.trim());
+        if (details.wikipedia && details.wikipedia.citations > 0) {
+            lines.push(`Wikipédia: ${details.wikipedia.citations} citations`);
+        }
+        if (details.lobsters && (details.lobsters.score > 0 || details.lobsters.comments > 0)) {
+            lines.push(`Lobste.rs: ${details.lobsters.score} pts (${details.lobsters.comments} comm.)`);
+        }
+        if (details.lemmy && (details.lemmy.score > 0 || details.lemmy.comments > 0)) {
+            lines.push(`Lemmy: ${details.lemmy.score} pts (${details.lemmy.comments} comm.)`);
+        }
+        if (details.github && details.github.mentions > 0) {
+            lines.push(`GitHub: ${details.github.mentions} mentions`);
+        }
+        if (details.wayback && details.wayback.archived) {
+            lines.push(`Wayback Machine: Présent dans les archives`);
+        }
+        
+        badge.setAttribute('title', lines.length > 0 ? lines.join('\n') : 'Aucune mention externe trouvée.');
     }
 };
 
