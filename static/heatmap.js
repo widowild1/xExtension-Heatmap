@@ -1,16 +1,33 @@
+const getI18n = () => {
+    const el = document.getElementById('heatmap-i18n');
+    if (el) {
+        try {
+            return JSON.parse(el.textContent);
+        } catch (e) {}
+    }
+    return {
+        sortByHeat: '🔥 Sort by Heat',
+        sorted: '🔥 Sorted!',
+        noUrl: '🌡️ No URL',
+        errData: '🌡️ Err Data',
+        errFetch: '🌡️ Err Fetch',
+    };
+};
+
 const processBadge = (badge, force = false) => {
     if (badge.dataset.loaded === 'true' && !force) return;
     badge.dataset.loaded = 'true';
     
+    const i18n = getI18n();
     const url = badge.dataset.url;
     const pubdate = badge.dataset.pubdate || 0;
     
     if (!url) {
-        badge.innerText = '🌡️ No URL';
+        badge.innerText = i18n.noUrl;
         return;
     }
 
-    badge.innerText = force ? '🌡️ ...' : '🌡️ ...';
+    badge.innerText = '🌡️ ...';
 
     let fetchUrl = `?c=heatmap&a=score&url=${encodeURIComponent(url)}&pubdate=${pubdate}`;
     if (force) fetchUrl += '&force=1';
@@ -24,12 +41,12 @@ const processBadge = (badge, force = false) => {
             if (data && data.score !== undefined) {
                 updateBadgeUI(badge, data.score, data.frozen);
             } else {
-                badge.innerText = '🌡️ Err Data';
+                badge.innerText = i18n.errData;
             }
         })
         .catch(e => {
             console.error("Heatmap extension error:", e);
-            badge.innerText = '🌡️ Err Fetch';
+            badge.innerText = i18n.errFetch;
         });
 };
 
@@ -60,7 +77,7 @@ const updateBadgeUI = (badge, score, frozen) => {
     badge.innerText = text;
 };
 
-// IntersectionObserver pour un lazy loading fluide
+// IntersectionObserver pour le lazy loading
 let badgeObserver = null;
 if ('IntersectionObserver' in window) {
     badgeObserver = new IntersectionObserver((entries, observer) => {
@@ -129,16 +146,18 @@ const sortFeedsByHeat = () => {
         }
     });
     
+    const i18n = getI18n();
     const btn = document.getElementById('ext-heatmap-sort-btn');
-    if (btn) btn.innerText = '🔥 Trié !';
+    if (btn) btn.innerText = i18n.sorted;
 };
 
 const addSortButton = () => {
     if (document.getElementById('ext-heatmap-sort-btn')) return;
     
+    const i18n = getI18n();
     const sortBtn = document.createElement('button');
     sortBtn.id = 'ext-heatmap-sort-btn';
-    sortBtn.innerText = '🔥 Trier par popularité';
+    sortBtn.innerText = i18n.sortByHeat;
     sortBtn.style.position = 'fixed';
     sortBtn.style.bottom = '20px';
     sortBtn.style.right = '20px';
