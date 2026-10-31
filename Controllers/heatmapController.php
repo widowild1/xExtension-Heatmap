@@ -80,10 +80,10 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 	}
 
 	private function getCacheEntry(string $url) {
-		if ($this->useSqlite &&$this->db) {
+		if ($this->useSqlite && $this->db) {
 			try {
-				$stmt =$this->db->prepare("SELECT score, timestamp, first_check, details FROM cache WHERE url = :url");
-				$stmt->execute([':url' =>$url]);
+				$stmt = $this->db->prepare("SELECT score, timestamp, first_check, details FROM cache WHERE url = :url");
+				$stmt->execute([':url' => $url]);
 				return $stmt->fetch(PDO::FETCH_ASSOC);
 			} catch (Throwable $e) {
 				return false;
@@ -100,11 +100,12 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		return false;
 	}
 
-	private function setCache(string $url, float $score, int$firstCheck, array $details): void {$now = time();
+	private function setCache(string $url, float $score, int $firstCheck, array $details): void {
+		$now = time();
 		$detailsJson = json_encode($details);
-		if ($this->useSqlite &&$this->db) {
+		if ($this->useSqlite && $this->db) {
 			try {
-				$stmt =$this->db->prepare("INSERT INTO cache (url, score, timestamp, first_check, details) VALUES (:url, :score, :timestamp, :first_check, :details)
+				$stmt = $this->db->prepare("INSERT INTO cache (url, score, timestamp, first_check, details) VALUES (:url, :score, :timestamp, :first_check, :details)
 					ON CONFLICT(url) DO UPDATE SET score=excluded.score, timestamp=excluded.timestamp, details=excluded.details");
 				$stmt->execute([
 					':url' => $url,
@@ -115,7 +116,8 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				]);
 			} catch (Throwable $e) {}
 		} else {
-			$file =$this->getCacheFilePath($url);$data = [
+			$file = $this->getCacheFilePath($url);
+			$data = [
 				'score' => $score,
 				'timestamp' => $now,
 				'first_check' => $firstCheck,
@@ -125,12 +127,12 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 	}
 
-	private function fetchUrl(string $url, int$timeout = 3) {
+	private function fetchUrl(string $url, int $timeout = 3) {
 		if (!function_exists('curl_init')) return false;
 		$ch = curl_init($url);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_TIMEOUT,$timeout);
-		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(2,$timeout));
+		curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(2, $timeout));
 		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 		curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
 		curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (FreshRSS Heatmap)');
@@ -139,25 +141,25 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		curl_close($ch);
 
-		if ($response === false || $httpCode < 200 ||$httpCode >= 400) {
+		if ($response === false || $httpCode < 200 || $httpCode >= 400) {
 			return false;
 		}
 		return $response;
 	}
 
-	// Nettoyage des paramètres d'URL pour optimiser la correspondance sur les API
 	private function cleanUrl(string $url): string {
 		$parsed = parse_url($url);
-		if (!$parsed || !isset($parsed['query'])) return$url;
+		if (!$parsed || !isset($parsed['query'])) return $url;
 		
-		parse_str($parsed['query'], $params);$badKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'ref'];
-		foreach ($badKeys as$k) {
+		parse_str($parsed['query'], $params);
+		$badKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'ref'];
+		foreach ($badKeys as $k) {
 			unset($params[$k]);
 		}
 		
-		$cleanUrl = $parsed['scheme'] . '://' .$parsed['host'];
-		if (isset($parsed['port'])) $cleanUrl .= ':' .$parsed['port'];
-		if (isset($parsed['path'])) $cleanUrl .=$parsed['path'];
+		$cleanUrl = $parsed['scheme'] . '://' . $parsed['host'];
+		if (isset($parsed['port'])) $cleanUrl .= ':' . $parsed['port'];
+		if (isset($parsed['path'])) $cleanUrl .= $parsed['path'];
 		if (!empty($params)) $cleanUrl .= '?' . http_build_query($params);
 		if (isset($parsed['fragment'])) $cleanUrl .= '#' . $parsed['fragment'];
 		
@@ -170,7 +172,9 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		
 		try {
 			$rawUrl = Minz_Request::param('url', '');
-			$pubdate = intval(Minz_Request::param('pubdate', 0));$force = Minz_Request::param('force', 0);
+			$rawTitle = Minz_Request::param('title', '');
+			$pubdate = intval(Minz_Request::param('pubdate', 0));
+			$force = Minz_Request::param('force', 0);
 			
 			if (empty($rawUrl)) {
 				echo json_encode(['error' => 'No URL provided']);
@@ -179,30 +183,48 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 
 			$url = $this->cleanUrl($rawUrl);
 
-			$cache = $this->getCacheEntry($url);
-			$now = time();$needsRefresh = false;
-			$frozen = false;
-			$firstCheck =$now;
+			// Nettoyage du titre pour la recherche
+			$cleanTitle = trim(preg_replace('/["\r\n\t]+/', ' ', strip_tags(html_entity_decode($rawTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
 
-			if (!$cache) {$needsRefresh = true;
+			// Domaine d'origine de l'article pour filtrer les auto-citations
+			$originalHost = parse_url($url, PHP_URL_HOST);
+			if ($originalHost) {
+				$originalHost = strtolower(preg_replace('/^www\./', '', $originalHost));
+			}
+
+			$cache = $this->getCacheEntry($url);
+			$now = time();
+			$needsRefresh = false;
+			$frozen = false;
+			$firstCheck = $now;
+
+			if (!$cache) {
+				$needsRefresh = true;
 			} else {
-				$firstCheck = !empty($cache['first_check']) ?$cache['first_check'] : $cache['timestamp'];$lastCheck = $cache['timestamp'];$daysSinceFirst = ($now -$firstCheck) / 86400;
-				$daysSincePub = ($now -$pubdate) / 86400;
-				$hoursSinceLast = ($now -$lastCheck) / 3600;
+				$firstCheck = !empty($cache['first_check']) ? $cache['first_check'] : $cache['timestamp'];
+				$lastCheck = $cache['timestamp'];
 				
-				if ($force) {$needsRefresh = true;
-				} elseif ($daysSinceFirst > 16) {$frozen = true;
+				$daysSinceFirst = ($now - $firstCheck) / 86400;
+				$daysSincePub = ($now - $pubdate) / 86400;
+				$hoursSinceLast = ($now - $lastCheck) / 3600;
+				
+				if ($force) {
+					$needsRefresh = true;
+				} elseif ($daysSinceFirst > 16) {
+					$frozen = true;
 					$needsRefresh = false;
-				} elseif ($daysSinceFirst <= 5 &&$daysSincePub <= 7) {
-					if ($hoursSinceLast >= 24) {$needsRefresh = true;
+				} elseif ($daysSinceFirst <= 5 && $daysSincePub <= 7) {
+					if ($hoursSinceLast >= 24) {
+						$needsRefresh = true;
 					}
 				} else {
-					if ($hoursSinceLast >= 48) {$needsRefresh = true;
+					if ($hoursSinceLast >= 48) {
+						$needsRefresh = true;
 					}
 				}
 			}
 
-			if (!$needsRefresh &&$cache) {
+			if (!$needsRefresh && $cache) {
 				echo json_encode([
 					'url' => $url,
 					'score' => round(floatval($cache['score']), 1),
@@ -214,86 +236,115 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 
 			$userConf = FreshRSS_Context::$user_conf;
-			$enableHN =$userConf->heatmap_enable_hn ?? true;
-			$enableReddit =$userConf->heatmap_enable_reddit ?? true;
-			$enableSearx =$userConf->heatmap_enable_searxng ?? true;
+			$enableHN = $userConf->heatmap_enable_hn ?? true;
+			$enableReddit = $userConf->heatmap_enable_reddit ?? true;
+			$enableSearx = $userConf->heatmap_enable_searxng ?? true;
 			$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
 			$timeout = intval($userConf->heatmap_timeout ?? 3);
-			if ($timeout < 1 || $timeout > 10)$timeout = 3;
+			if ($timeout < 1 || $timeout > 10) $timeout = 3;
 
 			$degrees = 98.6;
 			$scale = 1.25;
-			$encodedUrl = urlencode($url);$details = [
+			$encodedUrl = urlencode($url);
+			
+			$details = [
 				'hn' => ['points' => 0, 'mentions' => 0],
 				'reddit' => ['ups' => 0, 'mentions' => 0],
 				'searxng' => ['sources' => 0]
 			];
 
-			// 1. Hacker News
+			// 1. Hacker News (URL, repli par Titre)
 			if ($enableHN) {
-				$hnRaw =$this->fetchUrl("https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url", $timeout);
-				if ($hnRaw) {
-					$hnData = json_decode($hnRaw, true);
-					if (isset($hnData['hits']) && is_array($hnData['hits'])) {
-						$hnHits =$hnData['hits'];
-						usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));$weight = 0;
-						foreach ($hnHits as$hit) {
-							$points = intval($hit['points'] ?? 0);
-							if ($points > 0) {
-								$details['hn']['points'] +=$points;
-								$details['hn']['mentions']++;$post_score = log10($points + 10) *$scale;
-								$degrees +=$post_score / pow(2, $weight);$weight++;
-							}
+				$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url", $timeout);
+				$hnData = $hnRaw ? json_decode($hnRaw, true) : null;
+				
+				if (empty($hnData['hits']) && !empty($cleanTitle)) {
+					$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query=" . urlencode($cleanTitle) . "&tags=story&hitsPerPage=3", $timeout);
+					$hnData = $hnRaw ? json_decode($hnRaw, true) : null;
+				}
+
+				if (isset($hnData['hits']) && is_array($hnData['hits'])) {
+					$hnHits = $hnData['hits'];
+					usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
+					$weight = 0;
+					foreach ($hnHits as $hit) {
+						$points = intval($hit['points'] ?? 0);
+						if ($points > 0) {
+							$details['hn']['points'] += $points;
+							$details['hn']['mentions']++;
+							$post_score = log10($points + 10) * $scale;
+							$degrees += $post_score / pow(2, $weight);
+							$weight++;
 						}
 					}
 				}
 			}
 
-			// 2. Reddit
+			// 2. Reddit (URL, repli par Titre)
 			if ($enableReddit) {
-				$redditRaw =$this->fetchUrl("https://www.reddit.com/api/info.json?url={$encodedUrl}", $timeout);
-				if ($redditRaw) {
-					$redditData = json_decode($redditRaw, true);
-					if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {$subreddits = [];
-						foreach ($redditData['data']['children'] as $post) {$sub = $post['data']['subreddit'] ?? 'unknown';$ups = intval($post['data']['ups'] ?? 0);$subreddits[$sub][] =$ups;
-							$details['reddit']['ups'] +=$ups;
-							$details['reddit']['mentions']++;
-						}
-						foreach ($subreddits as $sub =>$upsList) {
-							rsort($upsList);
-							foreach ($upsList as$weight => $ups) {$post_score = log10($ups + 10) *$scale;
-								$degrees += $post_score / pow(2,$weight);
-							}
+				$redditRaw = $this->fetchUrl("https://www.reddit.com/api/info.json?url={$encodedUrl}", $timeout);
+				$redditData = $redditRaw ? json_decode($redditRaw, true) : null;
+
+				if (empty($redditData['data']['children']) && !empty($cleanTitle)) {
+					$redditRaw = $this->fetchUrl("https://www.reddit.com/search.json?q=" . urlencode('"' . $cleanTitle . '"') . "&sort=relevance&limit=3", $timeout);
+					$redditData = $redditRaw ? json_decode($redditRaw, true) : null;
+				}
+
+				if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
+					$subreddits = [];
+					foreach ($redditData['data']['children'] as $post) {
+						$sub = $post['data']['subreddit'] ?? 'unknown';
+						$ups = intval($post['data']['ups'] ?? 0);
+						$subreddits[$sub][] = $ups;
+						$details['reddit']['ups'] += $ups;
+						$details['reddit']['mentions']++;
+					}
+					foreach ($subreddits as $sub => $upsList) {
+						rsort($upsList);
+						foreach ($upsList as $weight => $ups) {
+							$post_score = log10($ups + 10) * $scale;
+							$degrees += $post_score / pow(2, $weight);
 						}
 					}
 				}
 			}
 
-			// 3. SearXNG
-			if ($enableSearx && !empty($searxBaseUrl)) {$searxApiUrl = rtrim($searxBaseUrl, '/') . "/search?q={$encodedUrl}&format=json";
-				$searxRaw =$this->fetchUrl($searxApiUrl,$timeout);
+			// 3. SearXNG (Recherche ciblée par Titre exact)
+			if ($enableSearx && !empty($searxBaseUrl)) {
+				$query = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
+				$searxApiUrl = rtrim($searxBaseUrl, '/') . "/search?q=" . urlencode($query) . "&format=json";
+				$searxRaw = $this->fetchUrl($searxApiUrl, $timeout);
+				
 				if ($searxRaw) {
 					$searxData = json_decode($searxRaw, true);
-					if (isset($searxData['results']) && is_array($searxData['results'])) {$domains = [];
-						foreach ($searxData['results'] as$result) {
+					if (isset($searxData['results']) && is_array($searxData['results'])) {
+						$domains = [];
+						foreach ($searxData['results'] as $result) {
 							if (empty($result['url'])) continue;
 							$host = parse_url($result['url'], PHP_URL_HOST);
 							if ($host) {
-								$host = strtolower(str_replace('www.', '',$host));
+								$host = strtolower(preg_replace('/^www\./', '', $host));
+								// Ignore le domaine source de l'article pour ne garder que les vraies mentions externes
+								if (!empty($originalHost) && $host === $originalHost) {
+									continue;
+								}
 								$domains[$host][] = 1;
 							}
 						}
-						foreach ($domains as $host =>$mentions) {
-							$details['searxng']['sources']++;$credibility = $this->multipliers[$host] ?? 1.0;
-							foreach ($mentions as$weight => $val) {$post_score = $scale * $credibility;
-								$degrees += $post_score / pow(2,$weight);
+						foreach ($domains as $host => $mentions) {
+							$details['searxng']['sources']++;
+							$credibility = $this->multipliers[$host] ?? 1.0;
+							foreach ($mentions as $weight => $val) {
+								$post_score = $scale * $credibility;
+								$degrees += $post_score / pow(2, $weight);
 							}
 						}
 					}
 				}
 			}
 
-			$finalScore = round($degrees, 1);$this->setCache($url,$finalScore, $firstCheck,$details);
+			$finalScore = round($degrees, 1);
+			$this->setCache($url, $finalScore, $firstCheck, $details);
 
 			echo json_encode([
 				'url' => $url,
