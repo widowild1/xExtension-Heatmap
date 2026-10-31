@@ -3,6 +3,9 @@
 class HeatmapExtension extends Minz_Extension {
 	
 	public function init() {
+		// Enregistre le dossier i18n auprès de Minz
+		$this->registerTranslates();
+
 		Minz_Extension::registerHook('entry_before_display', [$this, 'injectHeatmapUI']);
 		
 		$this->registerController('heatmap');
@@ -13,6 +16,8 @@ class HeatmapExtension extends Minz_Extension {
 	}
 
 	public function handleConfigureAction() {
+		$this->registerTranslates();
+
 		if (Minz_Request::isPost()) {
 			FreshRSS_Context::$user_conf->heatmap_searxng_url = rtrim(trim(Minz_Request::param('searxng_url', '')), '/');
 			FreshRSS_Context::$user_conf->heatmap_enable_searxng = Minz_Request::param('enable_searxng', 0) ? true : false;
