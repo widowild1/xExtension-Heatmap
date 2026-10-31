@@ -22,17 +22,41 @@ $current_unit = FreshRSS_Context::$user_conf->heatmap_unit ?? 'F';
     <div class="form-group">
         <label class="group-name"><?php echo _t('ext.heatmap.active_sources'); ?></label>
         <div class="group-controls">
-            <label class="checkbox" style="display: block; margin-bottom: 8px;">
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
                 <input type="checkbox" name="enable_searxng" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_searxng ?? true) ? 'checked="checked"' : ''; ?> />
                 <?php echo _t('ext.heatmap.enable_searxng'); ?>
             </label>
-            <label class="checkbox" style="display: block; margin-bottom: 8px;">
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
                 <input type="checkbox" name="enable_hn" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_hn ?? true) ? 'checked="checked"' : ''; ?> />
                 <?php echo _t('ext.heatmap.enable_hn'); ?>
             </label>
-            <label class="checkbox" style="display: block; margin-bottom: 8px;">
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
                 <input type="checkbox" name="enable_reddit" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_reddit ?? true) ? 'checked="checked"' : ''; ?> />
                 <?php echo _t('ext.heatmap.enable_reddit'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_bsky" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_bsky ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_bsky'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_wikipedia" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_wikipedia ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_wikipedia'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_lobsters" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_lobsters ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_lobsters'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_lemmy" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_lemmy ?? false) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_lemmy'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_wayback" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_wayback ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_wayback'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_github" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_github ?? false) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_github'); ?>
             </label>
         </div>
     </div>
