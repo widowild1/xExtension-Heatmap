@@ -22,6 +22,7 @@ const processBadge = (badge, force = false) => {
     const i18n = getI18n();
     const url = badge.dataset.url;
     const pubdate = badge.dataset.pubdate || 0;
+    const title = badge.dataset.title || '';
     
     if (!url) {
         badge.innerText = i18n.noUrl;
@@ -30,7 +31,7 @@ const processBadge = (badge, force = false) => {
 
     badge.innerText = '🌡️ ...';
 
-    let fetchUrl = `?c=heatmap&a=score&url=${encodeURIComponent(url)}&pubdate=${pubdate}`;
+    let fetchUrl = `?c=heatmap&a=score&url=${encodeURIComponent(url)}&pubdate=${pubdate}&title=${encodeURIComponent(title)}`;
     if (force) fetchUrl += '&force=1';
 
     fetch(fetchUrl)
@@ -55,7 +56,6 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     let displayScore = fahrenheitScore;
     let symbol = '°F';
     
-    // Conversion Celsius : C = (F - 32) * 5/9
     if (i18n.unit === 'C') {
         displayScore = (fahrenheitScore - 32) * (5/9);
         symbol = '°C';
@@ -85,22 +85,21 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     }
     badge.innerText = text;
     
-    // Infobulle détaillée au survol
     if (details) {
-        let title = '';
+        let tip = '';
         if (details.hn && details.hn.mentions > 0) {
-            title += `HackerNews: ${details.hn.points} pts (${details.hn.mentions} mentions)\n`;
+            tip += `HackerNews: ${details.hn.points} pts (${details.hn.mentions} mentions)\n`;
         }
         if (details.reddit && details.reddit.mentions > 0) {
-            title += `Reddit: ${details.reddit.ups} upvotes (${details.reddit.mentions} posts)\n`;
+            tip += `Reddit: ${details.reddit.ups} upvotes (${details.reddit.mentions} posts)\n`;
         }
         if (details.searxng && details.searxng.sources > 0) {
-            title += `SearXNG: ${details.searxng.sources} sources\n`;
+            tip += `SearXNG: ${details.searxng.sources} sources web\n`;
         }
-        if (!title) {
-            title = 'Aucune mention externe trouvée pour le moment.';
+        if (!tip) {
+            tip = 'Aucune mention externe trouvée pour le moment.';
         }
-        badge.setAttribute('title', title.trim());
+        badge.setAttribute('title', tip.trim());
     }
 };
 
