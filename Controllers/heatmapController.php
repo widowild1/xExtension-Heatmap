@@ -8,11 +8,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 	private $useSqlite = false;
 	
 	public function firstAction(): void {
-		if (!FreshRSS_Auth::hasAccess()) {
-			Minz_Error::error(403);
-			return;
-		}
-		
 		$extPath = dirname(__DIR__);
 		
 		$multipliersPath = $extPath . '/credibility_multipliers.json';
@@ -229,6 +224,364 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		return $results;
 	}
 
+	// Méthode réutilisable (appelable par AJAX ou par le hook cron)
+	public function calculateAndStoreScore(string $rawUrl, string $rawTitle, int $pubdate, bool $force = false): array {
+		$url = $this->cleanUrl($rawUrl);
+		$cleanTitle = trim(preg_replace('/["\r\n\t]+/', ' ', strip_tags(html_entity_decode($rawTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
+
+		$originalHost = parse_url($url, PHP_URL_HOST);
+		if ($originalHost) {
+			$originalHost = strtolower(preg_replace('/^www\./', '', $originalHost));
+		}
+
+		$cache = $this->getCacheEntry($url);
+		$now = time();
+		$needsRefresh = false;
+		$frozen = false;
+		$firstCheck = $now;
+
+		if (!$cache) {
+			$needsRefresh = true;
+		} else {
+			$firstCheck = !empty($cache['first_check']) ? $cache['first_check'] : $cache['timestamp'];
+			$lastCheck = $cache['timestamp'];
+			
+			$daysSinceFirst = ($now - $firstCheck) / 86400;
+			$daysSincePub = ($now - $pubdate) / 86400;
+			$hoursSinceLast = ($now - $lastCheck) / 3600;
+			
+			if ($force) {
+				$needsRefresh = true;
+			} elseif ($daysSinceFirst > 16) {
+				$frozen = true;
+				$needsRefresh = false;
+			} elseif ($daysSinceFirst <= 5 && $daysSincePub <= 7) {
+				if ($hoursSinceLast >= 24) $needsRefresh = true;
+			} else {
+				if ($hoursSinceLast >= 48) $needsRefresh = true;
+			}
+		}
+
+		if (!$needsRefresh && $cache) {
+			return [
+				'url' => $url,
+				'score' => round(floatval($cache['score']), 1),
+				'details' => isset($cache['details']) ? json_decode($cache['details'], true) : [],
+				'cached' => true,
+				'frozen' => $frozen
+			];
+		}
+
+		$userConf = FreshRSS_Context::$user_conf;
+		$enableHN = $userConf->heatmap_enable_hn ?? true;
+		$enableReddit = $userConf->heatmap_enable_reddit ?? true;
+		$enableSearx = $userConf->heatmap_enable_searxng ?? true;
+		$enableHister = $userConf->heatmap_enable_hister ?? false;
+		$enableBsky = $userConf->heatmap_enable_bsky ?? true;
+		$enableWikipedia = $userConf->heatmap_enable_wikipedia ?? true;
+		$enableLobsters = $userConf->heatmap_enable_lobsters ?? true;
+		$enableLemmy = $userConf->heatmap_enable_lemmy ?? false;
+		$enableWayback = $userConf->heatmap_enable_wayback ?? true;
+		$enableGithub = $userConf->heatmap_enable_github ?? false;
+
+		$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
+		$histerBaseUrl = trim($userConf->heatmap_hister_url ?? '');
+		$histerToken = trim($userConf->heatmap_hister_token ?? '');
+		$githubToken = trim($userConf->heatmap_github_token ?? '');
+		
+		$timeout = intval($userConf->heatmap_timeout ?? 3);
+		if ($timeout < 1 || $timeout > 10) $timeout = 3;
+
+		$degrees = 98.6;
+		$scale = 1.25;
+		$encodedUrl = urlencode($url);
+		
+		$details = [
+			'hn' => ['points' => 0, 'mentions' => 0],
+			'reddit' => ['ups' => 0, 'mentions' => 0],
+			'searxng' => ['sources' => 0],
+			'hister' => ['matches' => 0],
+			'bsky' => ['reposts' => 0, 'likes' => 0],
+			'wikipedia' => ['citations' => 0],
+			'lobsters' => ['score' => 0, 'comments' => 0],
+			'lemmy' => ['score' => 0, 'comments' => 0],
+			'wayback' => ['archived' => false],
+			'github' => ['mentions' => 0],
+			'discussion_url' => ''
+		];
+
+		// Requêtes Vague 1
+		$requests = [];
+		$headers = [];
+		
+		if ($enableHN) {
+			$requests['hn'] = "https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url";
+		}
+		if ($enableReddit) {
+			$requests['reddit'] = "https://www.reddit.com/api/info.json?url={$encodedUrl}";
+		}
+		if ($enableSearx && !empty($searxBaseUrl)) {
+			$q = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
+			$requests['searxng'] = rtrim($searxBaseUrl, '/') . "/search?q=" . urlencode($q) . "&format=json";
+		}
+		if ($enableHister && !empty($histerBaseUrl)) {
+			$hQ = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
+			$requests['hister'] = rtrim($histerBaseUrl, '/') . "/api/search?q=" . urlencode($hQ);
+			$headers['hister'] = !empty($histerToken) ? ['Authorization: Bearer ' . $histerToken, 'Accept: application/json'] : ['Accept: application/json'];
+		}
+		if ($enableBsky) {
+			$requests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={$encodedUrl}&limit=25";
+		}
+		if ($enableWikipedia && !empty($originalHost)) {
+			$parsedUrl = parse_url($url);
+			$path = $parsedUrl['path'] ?? '';
+			$euquery = $originalHost . $path;
+			$requests['wikipedia_fr'] = "https://fr.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
+			$requests['wikipedia_en'] = "https://en.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
+		}
+		if ($enableLobsters) {
+			$requests['lobsters'] = "https://lobste.rs/search.json?q={$encodedUrl}&what=stories";
+		}
+		if ($enableLemmy) {
+			$requests['lemmy'] = "https://lemmy.world/api/v3/post/list?sort=TopAll&page=1&limit=5&q={$encodedUrl}";
+		}
+		if ($enableWayback) {
+			$requests['wayback'] = "https://archive.org/wayback/available?url={$encodedUrl}";
+		}
+		if ($enableGithub) {
+			$requests['github'] = "https://api.github.com/search/issues?q={$encodedUrl}+in:body";
+			if (!empty($githubToken)) {
+				$headers['github'] = ['Authorization: token ' . $githubToken, 'User-Agent: FreshRSS-Heatmap'];
+			}
+		}
+
+		$responses = $this->fetchUrlsMulti($requests, $timeout, $headers);
+
+		// Vague 2 : Repli par Titre
+		$fallbackRequests = [];
+		$hnData = !empty($responses['hn']) ? json_decode($responses['hn'], true) : null;
+		if ($enableHN && empty($hnData['hits']) && !empty($cleanTitle)) {
+			$fallbackRequests['hn'] = "https://hn.algolia.com/api/v1/search?query=" . urlencode($cleanTitle) . "&tags=story&hitsPerPage=3";
+		}
+		$redditData = !empty($responses['reddit']) ? json_decode($responses['reddit'], true) : null;
+		if ($enableReddit && empty($redditData['data']['children']) && !empty($cleanTitle)) {
+			$fallbackRequests['reddit'] = "https://www.reddit.com/search.json?q=" . urlencode('"' . $cleanTitle . '"') . "&sort=relevance&limit=3";
+		}
+		$bskyData = !empty($responses['bsky']) ? json_decode($responses['bsky'], true) : null;
+		if ($enableBsky && empty($bskyData['posts']) && !empty($cleanTitle)) {
+			$fallbackRequests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=" . urlencode('"' . $cleanTitle . '"') . "&limit=10";
+		}
+		$lobstersData = !empty($responses['lobsters']) ? json_decode($responses['lobsters'], true) : null;
+		if ($enableLobsters && empty($lobstersData) && !empty($cleanTitle)) {
+			$fallbackRequests['lobsters'] = "https://lobste.rs/search.json?q=" . urlencode($cleanTitle) . "&what=stories";
+		}
+
+		if (!empty($fallbackRequests)) {
+			$fallbackResponses = $this->fetchUrlsMulti($fallbackRequests, $timeout);
+			if (isset($fallbackResponses['hn']) && $fallbackResponses['hn'] !== false) {
+				$hnData = json_decode($fallbackResponses['hn'], true);
+			}
+			if (isset($fallbackResponses['reddit']) && $fallbackResponses['reddit'] !== false) {
+				$redditData = json_decode($fallbackResponses['reddit'], true);
+			}
+			if (isset($fallbackResponses['bsky']) && $fallbackResponses['bsky'] !== false) {
+				$bskyData = json_decode($fallbackResponses['bsky'], true);
+			}
+			if (isset($fallbackResponses['lobsters']) && $fallbackResponses['lobsters'] !== false) {
+				$lobstersData = json_decode($fallbackResponses['lobsters'], true);
+			}
+		}
+
+		// Détection du lien de discussion le plus populaire
+		$topDiscussionUrl = '';
+		$topDiscussionPoints = 0;
+
+		// 1. Hacker News
+		if (isset($hnData['hits']) && is_array($hnData['hits'])) {
+			$hnHits = $hnData['hits'];
+			usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
+			$weight = 0;
+			foreach ($hnHits as $hit) {
+				$points = intval($hit['points'] ?? 0);
+				if ($points > 0) {
+					$details['hn']['points'] += $points;
+					$details['hn']['mentions']++;
+					$degrees += (log10($points + 10) * $scale) / pow(2, $weight);
+					if ($points > $topDiscussionPoints && !empty($hit['objectID'])) {
+						$topDiscussionPoints = $points;
+						$topDiscussionUrl = 'https://news.ycombinator.com/item?id=' . $hit['objectID'];
+					}
+					$weight++;
+				}
+			}
+		}
+
+		// 2. Reddit
+		if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
+			$subreddits = [];
+			foreach ($redditData['data']['children'] as $post) {
+				$sub = $post['data']['subreddit'] ?? 'unknown';
+				$ups = intval($post['data']['ups'] ?? 0);
+				$subreddits[$sub][] = $ups;
+				$details['reddit']['ups'] += $ups;
+				$details['reddit']['mentions']++;
+				if ($ups > $topDiscussionPoints && !empty($post['data']['permalink'])) {
+					$topDiscussionPoints = $ups;
+					$topDiscussionUrl = 'https://www.reddit.com' . $post['data']['permalink'];
+				}
+			}
+			foreach ($subreddits as $sub => $upsList) {
+				rsort($upsList);
+				foreach ($upsList as $weight => $ups) {
+					$degrees += (log10($ups + 10) * $scale) / pow(2, $weight);
+				}
+			}
+		}
+
+		// 3. SearXNG
+		if ($enableSearx && !empty($responses['searxng'])) {
+			$searxData = json_decode($responses['searxng'], true);
+			if (isset($searxData['results']) && is_array($searxData['results'])) {
+				$domains = [];
+				foreach ($searxData['results'] as $result) {
+					if (empty($result['url'])) continue;
+					$host = parse_url($result['url'], PHP_URL_HOST);
+					if ($host) {
+						$host = strtolower(preg_replace('/^www\./', '', $host));
+						if (!empty($originalHost) && $host === $originalHost) continue;
+						$domains[$host][] = 1;
+					}
+				}
+				foreach ($domains as $host => $mentions) {
+					$details['searxng']['sources']++;
+					$credibility = $this->multipliers[$host] ?? 1.0;
+					foreach ($mentions as $weight => $val) {
+						$degrees += ($scale * $credibility) / pow(2, $weight);
+					}
+				}
+			}
+		}
+
+		// 4. Hister
+		if ($enableHister && !empty($responses['hister'])) {
+			$histerData = json_decode($responses['hister'], true);
+			$hResults = $histerData['results'] ?? $histerData['documents'] ?? (is_array($histerData) ? $histerData : []);
+			$hCount = count($hResults);
+			if ($hCount > 0) {
+				$details['hister']['matches'] = $hCount;
+				$degrees += 2.5 + (log10($hCount + 10) * $scale);
+			}
+		}
+
+		// 5. Bluesky
+		if (isset($bskyData['posts']) && is_array($bskyData['posts'])) {
+			$totalEngage = 0;
+			foreach ($bskyData['posts'] as $post) {
+				$reposts = intval($post['repostCount'] ?? 0);
+				$likes = intval($post['likeCount'] ?? 0);
+				$replies = intval($post['replyCount'] ?? 0);
+				$details['bsky']['reposts'] += $reposts;
+				$details['bsky']['likes'] += $likes;
+				$postScore = ($reposts * 2) + $likes + $replies;
+				$totalEngage += $postScore;
+				if ($postScore > $topDiscussionPoints && !empty($post['uri'])) {
+					$topDiscussionPoints = $postScore;
+					$parts = explode('/', $post['uri']);
+					$rkey = end($parts);
+					$author = $post['author']['handle'] ?? '';
+					if ($author) {
+						$topDiscussionUrl = "https://bsky.app/profile/{$author}/post/{$rkey}";
+					}
+				}
+			}
+			if ($totalEngage > 0) {
+				$degrees += log10($totalEngage + 10) * $scale;
+			}
+		}
+
+		// 6. Wikipédia
+		if ($enableWikipedia) {
+			$citations = 0;
+			if (!empty($responses['wikipedia_fr'])) {
+				$wData = json_decode($responses['wikipedia_fr'], true);
+				if (!empty($wData['query']['exturlusage'])) $citations += count($wData['query']['exturlusage']);
+			}
+			if (!empty($responses['wikipedia_en'])) {
+				$wData = json_decode($responses['wikipedia_en'], true);
+				if (!empty($wData['query']['exturlusage'])) $citations += count($wData['query']['exturlusage']);
+			}
+			if ($citations > 0) {
+				$details['wikipedia']['citations'] = $citations;
+				$degrees += log10($citations + 10) * $scale * 2.0;
+			}
+		}
+
+		// 7. Lobste.rs
+		if (is_array($lobstersData) && !empty($lobstersData)) {
+			$weight = 0;
+			foreach ($lobstersData as $story) {
+				$storyScore = intval($story['score'] ?? 0);
+				$commentCount = intval($story['comment_count'] ?? 0);
+				$details['lobsters']['score'] += $storyScore;
+				$details['lobsters']['comments'] += $commentCount;
+				$degrees += (log10($storyScore + $commentCount + 10) * $scale) / pow(2, $weight);
+				if ($storyScore > $topDiscussionPoints && !empty($story['comments_url'])) {
+					$topDiscussionPoints = $storyScore;
+					$topDiscussionUrl = $story['comments_url'];
+				}
+				$weight++;
+			}
+		}
+
+		// 8. Lemmy
+		if ($enableLemmy && !empty($responses['lemmy'])) {
+			$lemmyData = json_decode($responses['lemmy'], true);
+			if (isset($lemmyData['posts']) && is_array($lemmyData['posts'])) {
+				$weight = 0;
+				foreach ($lemmyData['posts'] as $postView) {
+					$counts = $postView['counts'] ?? [];
+					$lScore = intval($counts['score'] ?? 0);
+					$lComments = intval($counts['comments'] ?? 0);
+					$details['lemmy']['score'] += $lScore;
+					$details['lemmy']['comments'] += $lComments;
+					$degrees += (log10($lScore + $lComments + 10) * $scale) / pow(2, $weight);
+					$weight++;
+				}
+			}
+		}
+
+		// 9. Wayback Machine
+		if ($enableWayback && !empty($responses['wayback'])) {
+			$wbData = json_decode($responses['wayback'], true);
+			if (!empty($wbData['archived_snapshots']['closest']['available'])) {
+				$details['wayback']['archived'] = true;
+				$degrees += 1.5;
+			}
+		}
+
+		// 10. GitHub
+		if ($enableGithub && !empty($responses['github'])) {
+			$ghData = json_decode($responses['github'], true);
+			$ghCount = intval($ghData['total_count'] ?? 0);
+			if ($ghCount > 0) {
+				$details['github']['mentions'] = $ghCount;
+				$degrees += log10($ghCount + 10) * $scale;
+			}
+		}
+
+		$details['discussion_url'] = $topDiscussionUrl;
+		$finalScore = round($degrees, 1);
+		$this->setCache($url, $finalScore, $firstCheck, $details);
+
+		return [
+			'url' => $url,
+			'score' => $finalScore,
+			'details' => $details,
+			'cached' => false,
+			'frozen' => $frozen
+		];
+	}
+
 	public function scoreAction(): void {
 		$this->view->_layout(false);
 		header('Content-Type: application/json');
@@ -237,349 +590,15 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			$rawUrl = Minz_Request::param('url', '');
 			$rawTitle = Minz_Request::param('title', '');
 			$pubdate = intval(Minz_Request::param('pubdate', 0));
-			$force = Minz_Request::param('force', 0);
+			$force = (bool)Minz_Request::param('force', 0);
 			
 			if (empty($rawUrl)) {
 				echo json_encode(['error' => 'No URL provided']);
 				return;
 			}
 
-			$url = $this->cleanUrl($rawUrl);
-			$cleanTitle = trim(preg_replace('/["\r\n\t]+/', ' ', strip_tags(html_entity_decode($rawTitle, ENT_QUOTES | ENT_HTML5, 'UTF-8'))));
-
-			$originalHost = parse_url($url, PHP_URL_HOST);
-			if ($originalHost) {
-				$originalHost = strtolower(preg_replace('/^www\./', '', $originalHost));
-			}
-
-			$cache = $this->getCacheEntry($url);
-			$now = time();
-			$needsRefresh = false;
-			$frozen = false;
-			$firstCheck = $now;
-
-			if (!$cache) {
-				$needsRefresh = true;
-			} else {
-				$firstCheck = !empty($cache['first_check']) ? $cache['first_check'] : $cache['timestamp'];
-				$lastCheck = $cache['timestamp'];
-				
-				$daysSinceFirst = ($now - $firstCheck) / 86400;
-				$daysSincePub = ($now - $pubdate) / 86400;
-				$hoursSinceLast = ($now - $lastCheck) / 3600;
-				
-				if ($force) {
-					$needsRefresh = true;
-				} elseif ($daysSinceFirst > 16) {
-					$frozen = true;
-					$needsRefresh = false;
-				} elseif ($daysSinceFirst <= 5 && $daysSincePub <= 7) {
-					if ($hoursSinceLast >= 24) {
-						$needsRefresh = true;
-					}
-				} else {
-					if ($hoursSinceLast >= 48) {
-						$needsRefresh = true;
-					}
-				}
-			}
-
-			if (!$needsRefresh && $cache) {
-				echo json_encode([
-					'url' => $url,
-					'score' => round(floatval($cache['score']), 1),
-					'details' => isset($cache['details']) ? json_decode($cache['details'], true) : [],
-					'cached' => true,
-					'frozen' => $frozen
-				]);
-				return;
-			}
-
-			$userConf = FreshRSS_Context::$user_conf;
-			$enableHN = $userConf->heatmap_enable_hn ?? true;
-			$enableReddit = $userConf->heatmap_enable_reddit ?? true;
-			$enableSearx = $userConf->heatmap_enable_searxng ?? true;
-			$enableHister = $userConf->heatmap_enable_hister ?? false;
-			$enableBsky = $userConf->heatmap_enable_bsky ?? true;
-			$enableWikipedia = $userConf->heatmap_enable_wikipedia ?? true;
-			$enableLobsters = $userConf->heatmap_enable_lobsters ?? true;
-			$enableLemmy = $userConf->heatmap_enable_lemmy ?? false;
-			$enableWayback = $userConf->heatmap_enable_wayback ?? true;
-			$enableGithub = $userConf->heatmap_enable_github ?? false;
-
-			$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
-			$histerBaseUrl = trim($userConf->heatmap_hister_url ?? '');
-			$histerToken = trim($userConf->heatmap_hister_token ?? '');
-			
-			$timeout = intval($userConf->heatmap_timeout ?? 3);
-			if ($timeout < 1 || $timeout > 10) $timeout = 3;
-
-			$degrees = 98.6;
-			$scale = 1.25;
-			$encodedUrl = urlencode($url);
-			
-			$details = [
-				'hn' => ['points' => 0, 'mentions' => 0],
-				'reddit' => ['ups' => 0, 'mentions' => 0],
-				'searxng' => ['sources' => 0],
-				'hister' => ['matches' => 0],
-				'bsky' => ['reposts' => 0, 'likes' => 0],
-				'wikipedia' => ['citations' => 0],
-				'lobsters' => ['score' => 0, 'comments' => 0],
-				'lemmy' => ['score' => 0, 'comments' => 0],
-				'wayback' => ['archived' => false],
-				'github' => ['mentions' => 0],
-			];
-
-			// VAGUE 1 : Requêtes simultanées
-			$requests = [];
-			$headers = [];
-			
-			if ($enableHN) {
-				$requests['hn'] = "https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url";
-			}
-			if ($enableReddit) {
-				$requests['reddit'] = "https://www.reddit.com/api/info.json?url={$encodedUrl}";
-			}
-			if ($enableSearx && !empty($searxBaseUrl)) {
-				$q = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
-				$requests['searxng'] = rtrim($searxBaseUrl, '/') . "/search?q=" . urlencode($q) . "&format=json";
-			}
-			if ($enableHister && !empty($histerBaseUrl)) {
-				$hQ = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
-				$requests['hister'] = rtrim($histerBaseUrl, '/') . "/api/search?q=" . urlencode($hQ);
-				if (!empty($histerToken)) {
-					$headers['hister'] = ['Authorization: Bearer ' . $histerToken, 'Accept: application/json'];
-				} else {
-					$headers['hister'] = ['Accept: application/json'];
-				}
-			}
-			if ($enableBsky) {
-				$requests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={$encodedUrl}&limit=25";
-			}
-			if ($enableWikipedia && !empty($originalHost)) {
-				$parsedUrl = parse_url($url);
-				$path = $parsedUrl['path'] ?? '';
-				$euquery = $originalHost . $path;
-				$requests['wikipedia_fr'] = "https://fr.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
-				$requests['wikipedia_en'] = "https://en.wikipedia.org/w/api.php?action=query&list=exturlusage&euquery=" . urlencode($euquery) . "&format=json";
-			}
-			if ($enableLobsters) {
-				$requests['lobsters'] = "https://lobste.rs/search.json?q={$encodedUrl}&what=stories";
-			}
-			if ($enableLemmy) {
-				$requests['lemmy'] = "https://lemmy.world/api/v3/post/list?sort=TopAll&page=1&limit=5&q={$encodedUrl}";
-			}
-			if ($enableWayback) {
-				$requests['wayback'] = "https://archive.org/wayback/available?url={$encodedUrl}";
-			}
-			if ($enableGithub) {
-				$requests['github'] = "https://api.github.com/search/issues?q={$encodedUrl}+in:body";
-			}
-
-			$responses = $this->fetchUrlsMulti($requests, $timeout, $headers);
-
-			// VAGUE 2 : Repli par Titre si vide
-			$fallbackRequests = [];
-			$hnData = !empty($responses['hn']) ? json_decode($responses['hn'], true) : null;
-			if ($enableHN && empty($hnData['hits']) && !empty($cleanTitle)) {
-				$fallbackRequests['hn'] = "https://hn.algolia.com/api/v1/search?query=" . urlencode($cleanTitle) . "&tags=story&hitsPerPage=3";
-			}
-			
-			$redditData = !empty($responses['reddit']) ? json_decode($responses['reddit'], true) : null;
-			if ($enableReddit && empty($redditData['data']['children']) && !empty($cleanTitle)) {
-				$fallbackRequests['reddit'] = "https://www.reddit.com/search.json?q=" . urlencode('"' . $cleanTitle . '"') . "&sort=relevance&limit=3";
-			}
-			
-			$bskyData = !empty($responses['bsky']) ? json_decode($responses['bsky'], true) : null;
-			if ($enableBsky && empty($bskyData['posts']) && !empty($cleanTitle)) {
-				$fallbackRequests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=" . urlencode('"' . $cleanTitle . '"') . "&limit=10";
-			}
-			
-			$lobstersData = !empty($responses['lobsters']) ? json_decode($responses['lobsters'], true) : null;
-			if ($enableLobsters && empty($lobstersData) && !empty($cleanTitle)) {
-				$fallbackRequests['lobsters'] = "https://lobste.rs/search.json?q=" . urlencode($cleanTitle) . "&what=stories";
-			}
-
-			if (!empty($fallbackRequests)) {
-				$fallbackResponses = $this->fetchUrlsMulti($fallbackRequests, $timeout);
-				if (isset($fallbackResponses['hn']) && $fallbackResponses['hn'] !== false) {
-					$hnData = json_decode($fallbackResponses['hn'], true);
-				}
-				if (isset($fallbackResponses['reddit']) && $fallbackResponses['reddit'] !== false) {
-					$redditData = json_decode($fallbackResponses['reddit'], true);
-				}
-				if (isset($fallbackResponses['bsky']) && $fallbackResponses['bsky'] !== false) {
-					$bskyData = json_decode($fallbackResponses['bsky'], true);
-				}
-				if (isset($fallbackResponses['lobsters']) && $fallbackResponses['lobsters'] !== false) {
-					$lobstersData = json_decode($fallbackResponses['lobsters'], true);
-				}
-			}
-
-			// SCORING
-			// 1. Hacker News
-			if (isset($hnData['hits']) && is_array($hnData['hits'])) {
-				$hnHits = $hnData['hits'];
-				usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
-				$weight = 0;
-				foreach ($hnHits as $hit) {
-					$points = intval($hit['points'] ?? 0);
-					if ($points > 0) {
-						$details['hn']['points'] += $points;
-						$details['hn']['mentions']++;
-						$degrees += (log10($points + 10) * $scale) / pow(2, $weight);
-						$weight++;
-					}
-				}
-			}
-
-			// 2. Reddit
-			if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
-				$subreddits = [];
-				foreach ($redditData['data']['children'] as $post) {
-					$sub = $post['data']['subreddit'] ?? 'unknown';
-					$ups = intval($post['data']['ups'] ?? 0);
-					$subreddits[$sub][] = $ups;
-					$details['reddit']['ups'] += $ups;
-					$details['reddit']['mentions']++;
-				}
-				foreach ($subreddits as $sub => $upsList) {
-					rsort($upsList);
-					foreach ($upsList as $weight => $ups) {
-						$degrees += (log10($ups + 10) * $scale) / pow(2, $weight);
-					}
-				}
-			}
-
-			// 3. SearXNG
-			if ($enableSearx && !empty($responses['searxng'])) {
-				$searxData = json_decode($responses['searxng'], true);
-				if (isset($searxData['results']) && is_array($searxData['results'])) {
-					$domains = [];
-					foreach ($searxData['results'] as $result) {
-						if (empty($result['url'])) continue;
-						$host = parse_url($result['url'], PHP_URL_HOST);
-						if ($host) {
-							$host = strtolower(preg_replace('/^www\./', '', $host));
-							if (!empty($originalHost) && $host === $originalHost) continue;
-							$domains[$host][] = 1;
-						}
-					}
-					foreach ($domains as $host => $mentions) {
-						$details['searxng']['sources']++;
-						$credibility = $this->multipliers[$host] ?? 1.0;
-						foreach ($mentions as $weight => $val) {
-							$degrees += ($scale * $credibility) / pow(2, $weight);
-						}
-					}
-				}
-			}
-
-			// 4. Hister (Moteur personnel privé)
-			if ($enableHister && !empty($responses['hister'])) {
-				$histerData = json_decode($responses['hister'], true);
-				$hResults = $histerData['results'] ?? $histerData['documents'] ?? (is_array($histerData) ? $histerData : []);
-				$hCount = count($hResults);
-				if ($hCount > 0) {
-					$details['hister']['matches'] = $hCount;
-					// Bonus de pertinence personnelle : +2.5°F de base + logarithme des correspondances
-					$degrees += 2.5 + (log10($hCount + 10) * $scale);
-				}
-			}
-
-			// 5. Bluesky
-			if (isset($bskyData['posts']) && is_array($bskyData['posts'])) {
-				$totalEngage = 0;
-				foreach ($bskyData['posts'] as $post) {
-					$reposts = intval($post['repostCount'] ?? 0);
-					$likes = intval($post['likeCount'] ?? 0);
-					$replies = intval($post['replyCount'] ?? 0);
-					$details['bsky']['reposts'] += $reposts;
-					$details['bsky']['likes'] += $likes;
-					$totalEngage += ($reposts * 2) + $likes + $replies;
-				}
-				if ($totalEngage > 0) {
-					$degrees += log10($totalEngage + 10) * $scale;
-				}
-			}
-
-			// 6. Wikipédia
-			if ($enableWikipedia) {
-				$citations = 0;
-				if (!empty($responses['wikipedia_fr'])) {
-					$wData = json_decode($responses['wikipedia_fr'], true);
-					if (!empty($wData['query']['exturlusage'])) $citations += count($wData['query']['exturlusage']);
-				}
-				if (!empty($responses['wikipedia_en'])) {
-					$wData = json_decode($responses['wikipedia_en'], true);
-					if (!empty($wData['query']['exturlusage'])) $citations += count($wData['query']['exturlusage']);
-				}
-				if ($citations > 0) {
-					$details['wikipedia']['citations'] = $citations;
-					$degrees += log10($citations + 10) * $scale * 2.0;
-				}
-			}
-
-			// 7. Lobste.rs
-			if (is_array($lobstersData) && !empty($lobstersData)) {
-				$weight = 0;
-				foreach ($lobstersData as $story) {
-					$storyScore = intval($story['score'] ?? 0);
-					$commentCount = intval($story['comment_count'] ?? 0);
-					$details['lobsters']['score'] += $storyScore;
-					$details['lobsters']['comments'] += $commentCount;
-					$degrees += (log10($storyScore + $commentCount + 10) * $scale) / pow(2, $weight);
-					$weight++;
-				}
-			}
-
-			// 8. Lemmy
-			if ($enableLemmy && !empty($responses['lemmy'])) {
-				$lemmyData = json_decode($responses['lemmy'], true);
-				if (isset($lemmyData['posts']) && is_array($lemmyData['posts'])) {
-					$weight = 0;
-					foreach ($lemmyData['posts'] as $postView) {
-						$counts = $postView['counts'] ?? [];
-						$lScore = intval($counts['score'] ?? 0);
-						$lComments = intval($counts['comments'] ?? 0);
-						$details['lemmy']['score'] += $lScore;
-						$details['lemmy']['comments'] += $lComments;
-						$degrees += (log10($lScore + $lComments + 10) * $scale) / pow(2, $weight);
-						$weight++;
-					}
-				}
-			}
-
-			// 9. Wayback Machine
-			if ($enableWayback && !empty($responses['wayback'])) {
-				$wbData = json_decode($responses['wayback'], true);
-				if (!empty($wbData['archived_snapshots']['closest']['available'])) {
-					$details['wayback']['archived'] = true;
-					$degrees += 1.5;
-				}
-			}
-
-			// 10. GitHub
-			if ($enableGithub && !empty($responses['github'])) {
-				$ghData = json_decode($responses['github'], true);
-				$ghCount = intval($ghData['total_count'] ?? 0);
-				if ($ghCount > 0) {
-					$details['github']['mentions'] = $ghCount;
-					$degrees += log10($ghCount + 10) * $scale;
-				}
-			}
-
-			$finalScore = round($degrees, 1);
-			$this->setCache($url, $finalScore, $firstCheck, $details);
-
-			echo json_encode([
-				'url' => $url,
-				'score' => $finalScore,
-				'details' => $details,
-				'cached' => false,
-				'frozen' => $frozen
-			]);
+			$result = $this->calculateAndStoreScore($rawUrl, $rawTitle, $pubdate, $force);
+			echo json_encode($result);
 		} catch (Throwable $e) {
 			echo json_encode([
 				'url' => Minz_Request::param('url', ''),
