@@ -27,14 +27,16 @@ The temperature is injected directly into your feed list and article view:
 You can also click the floating **🔥 Sort by Heat** button to instantly reorder your current view by temperature, or **click directly on any temperature badge** to force a manual refresh!
 
 ## Installation
+1. sudo apt update && upgrade
+2. sudo apt install php-sqlite3 php-curl
 
-1. Clone this repository into your FreshRSS `extensions` directory under the name `xExtension-Heatmap`:
+3. Clone this repository into your FreshRSS `extensions` directory under the name `xExtension-Heatmap`:
    `git clone https://github.com/iovictor/xExtension-Heatmap.git`
 
-2. Log into your FreshRSS account.
-3. Go to **Configuration** > **Extensions**.
-4. Enable the **Heatmap** extension.
-5. *(Optional)* Edit the `credibility_multipliers.json` file to adjust domain weightings for the SearXNG integration.
+4. Log into your FreshRSS account.
+5. Go to **Configuration** > **Extensions**.
+6. Enable the **Heatmap** extension.
+7. *(Optional)* Edit the `credibility_multipliers.json` file to adjust domain weightings for the SearXNG integration.
 
 ## Intelligent Caching Schedule
 
