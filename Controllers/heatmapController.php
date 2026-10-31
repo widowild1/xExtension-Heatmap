@@ -4,8 +4,8 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 	
 	private $db = null;
 	private $multipliers = [];
-	private $cacheFile = null;
-	private $fileCache = null;
+	private $cacheDir = null;
+	private $useSqlite = false;
 	
 	public function firstAction(): void {
 		if (!FreshRSS_Auth::hasAccess()) {
@@ -15,21 +15,29 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		
 		$extPath = dirname(__DIR__);
 		
-		// 1. Multiplicateurs de crédibilité
+		// 1. Multiplicateurs de crédibilité des domaines
 		$multipliersPath = $extPath . '/credibility_multipliers.json';
 		if (file_exists($multipliersPath)) {
 			$this->multipliers = json_decode(file_get_contents($multipliersPath), true) ?: [];
 		}
 
-		// Dossier de cache privilégié
-		$cacheDir = (defined('DATA_PATH') && is_dir(DATA_PATH . '/cache') && is_writable(DATA_PATH . '/cache'))
-			? DATA_PATH . '/cache'
-			: (is_writable($extPath) ? $extPath : sys_get_temp_dir());
+		// 2. Détermination du répertoire de cache
+		if (defined('DATA_PATH') && is_dir(DATA_PATH . '/cache') && is_writable(DATA_PATH . '/cache')) {
+			$this->cacheDir = DATA_PATH . '/cache/heatmap';
+		} elseif (is_writable($extPath)) {
+			$this->cacheDir = $extPath . '/cache';
+		} else {
+			$this->cacheDir = sys_get_temp_dir() . '/freshrss_heatmap';
+		}
 
-		// 2. Initialisation du cache : SQLite si le driver PDO SQLite est installé, sinon Fallback JSON
+		if (!is_dir($this->cacheDir)) {
+			@mkdir($this->cacheDir, 0775, true);
+		}
+
+		// 3. Initialisation SQLite (si le module est disponible)
 		if (extension_loaded('pdo_sqlite') && class_exists('PDO') && in_array('sqlite', PDO::getAvailableDrivers())) {
 			try {
-				$dbPath = $cacheDir . '/heatmap_cache.sqlite';
+				$dbPath = $this->cacheDir . '/heatmap_cache.sqlite';
 				$this->db = new PDO('sqlite:' . $dbPath);
 				$this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 				$this->db->exec("CREATE TABLE IF NOT EXISTS cache (
@@ -47,25 +55,34 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				if (rand(1, 100) === 1) {
 					$this->db->exec("DELETE FROM cache WHERE timestamp < " . (time() - 86400 * 60));
 				}
+				$this->useSqlite = true;
 			} catch (Throwable $e) {
-				error_log('Heatmap Extension SQLite Error: ' . $e->getMessage());
+				error_log('Heatmap SQLite init warning: ' . $e->getMessage());
 				$this->db = null;
+				$this->useSqlite = false;
 			}
 		}
 
-		// Fallback fichier JSON si SQLite n'est pas disponible ou a échoué
-		if (!$this->db) {
-			$this->cacheFile = $cacheDir . '/heatmap_cache.json';
-			if (file_exists($this->cacheFile)) {
-				$this->fileCache = json_decode(file_get_contents($this->cacheFile), true) ?: [];
-			} else {
-				$this->fileCache = [];
+		// Nettoyage périodique pour le cache fichier JSON (1% de chance)
+		if (!$this->useSqlite && rand(1, 100) === 1 && is_dir($this->cacheDir)) {
+			$files = @glob($this->cacheDir . '/*.json');
+			if ($files) {
+				$expire = time() - (86400 * 60);
+				foreach ($files as $file) {
+					if (@filemtime($file) < $expire) {
+						@unlink($file);
+					}
+				}
 			}
 		}
 	}
 
-	private function getCacheEntry($url) {
-		if ($this->db) {
+	private function getCacheFilePath(string $url): string {
+		return $this->cacheDir . '/' . sha1($url) . '.json';
+	}
+
+	private function getCacheEntry(string $url) {
+		if ($this->useSqlite && $this->db) {
 			try {
 				$stmt = $this->db->prepare("SELECT score, timestamp, first_check FROM cache WHERE url = :url");
 				$stmt->execute([':url' => $url]);
@@ -73,44 +90,61 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			} catch (Throwable $e) {
 				return false;
 			}
-		} elseif ($this->fileCache !== null && isset($this->fileCache[$url])) {
-			return $this->fileCache[$url];
+		} else {
+			$file = $this->getCacheFilePath($url);
+			if (file_exists($file)) {
+				$data = json_decode(@file_get_contents($file), true);
+				if (is_array($data) && isset($data['score'])) {
+					return $data;
+				}
+			}
 		}
 		return false;
 	}
 
-	private function setCache($url, $score, $firstCheck) {
-		if ($this->db) {
+	private function setCache(string $url, float $score, int $firstCheck): void {
+		$now = time();
+		if ($this->useSqlite && $this->db) {
 			try {
 				$stmt = $this->db->prepare("INSERT INTO cache (url, score, timestamp, first_check) VALUES (:url, :score, :timestamp, :first_check)
 					ON CONFLICT(url) DO UPDATE SET score=excluded.score, timestamp=excluded.timestamp");
 				$stmt->execute([
 					':url' => $url,
 					':score' => $score,
-					':timestamp' => time(),
+					':timestamp' => $now,
 					':first_check' => $firstCheck
 				]);
 			} catch (Throwable $e) {}
-		} elseif ($this->cacheFile) {
-			$this->fileCache[$url] = [
+		} else {
+			$file = $this->getCacheFilePath($url);
+			$data = [
 				'score' => $score,
-				'timestamp' => time(),
+				'timestamp' => $now,
 				'first_check' => $firstCheck
 			];
-			@file_put_contents($this->cacheFile, json_encode($this->fileCache), LOCK_EX);
+			@file_put_contents($file, json_encode($data), LOCK_EX);
 		}
 	}
 
-	private function fetchUrl($url) {
+	private function fetchUrl(string $url, int $timeout = 3) {
 		if (!function_exists('curl_init')) {
 			return false;
 		}
 		$ch = curl_init($url);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_TIMEOUT, 3);
-		curl_setopt($ch, CURLOPT_USERAGENT, 'FreshRSS-Heatmap-Extension/1.0');
+		curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(2, $timeout));
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+		curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (FreshRSS Heatmap)');
+		
 		$response = curl_exec($ch);
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		curl_close($ch);
+
+		if ($response === false || $httpCode < 200 || $httpCode >= 400) {
+			return false;
+		}
 		return $response;
 	}
 
@@ -137,7 +171,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			if (!$cache) {
 				$needsRefresh = true;
 			} else {
-				$firstCheck = $cache['first_check'] ?: $cache['timestamp'];
+				$firstCheck = !empty($cache['first_check']) ? $cache['first_check'] : $cache['timestamp'];
 				$lastCheck = $cache['timestamp'];
 				
 				$daysSinceFirst = ($now - $firstCheck) / 86400;
@@ -161,60 +195,76 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 
 			if (!$needsRefresh && $cache) {
-				echo json_encode(['url' => $url, 'score' => round($cache['score'], 1), 'cached' => true, 'frozen' => $frozen]);
+				echo json_encode([
+					'url' => $url,
+					'score' => round(floatval($cache['score']), 1),
+					'cached' => true,
+					'frozen' => $frozen
+				]);
 				return;
 			}
 
+			// Configuration utilisateur
+			$userConf = FreshRSS_Context::$user_conf;
+			$enableHN = $userConf->heatmap_enable_hn ?? true;
+			$enableReddit = $userConf->heatmap_enable_reddit ?? true;
+			$enableSearx = $userConf->heatmap_enable_searxng ?? true;
+			$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
+			$timeout = intval($userConf->heatmap_timeout ?? 3);
+			if ($timeout < 1 || $timeout > 10) {
+				$timeout = 3;
+			}
+
+			// Calcul de température Fever (Base 98.6°F, facteur 1.25)
 			$degrees = 98.6;
 			$scale = 1.25;
 			$encodedUrl = urlencode($url);
 
-			// 2. HackerNews (Algolia)
-			$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url");
-			if ($hnRaw) {
-				$hnData = json_decode($hnRaw, true);
-				if (isset($hnData['hits']) && is_array($hnData['hits'])) {
-					$hnHits = $hnData['hits'];
-					usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
-					$weight = 0;
-					foreach ($hnHits as $hit) {
-						$points = intval($hit['points'] ?? 0);
-						$post_score = log10($points + 10) * $scale;
-						$degrees += $post_score / pow(2, $weight);
-						$weight++;
-					}
-				}
-			}
-
-			// 3. Reddit API
-			$redditRaw = $this->fetchUrl("https://www.reddit.com/api/info.json?url={$encodedUrl}");
-			if ($redditRaw) {
-				$redditData = json_decode($redditRaw, true);
-				if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
-					$subreddits = [];
-					foreach ($redditData['data']['children'] as $post) {
-						$sub = $post['data']['subreddit'] ?? 'unknown';
-						$subreddits[$sub][] = intval($post['data']['ups'] ?? 0);
-					}
-					foreach ($subreddits as $sub => $upsList) {
-						rsort($upsList);
-						foreach ($upsList as $weight => $ups) {
-							$post_score = log10($ups + 10) * $scale;
+			// 1. Hacker News (Algolia API)
+			if ($enableHN) {
+				$hnRaw = $this->fetchUrl("https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url", $timeout);
+				if ($hnRaw) {
+					$hnData = json_decode($hnRaw, true);
+					if (isset($hnData['hits']) && is_array($hnData['hits'])) {
+						$hnHits = $hnData['hits'];
+						usort($hnHits, fn($a, $b) => intval($b['points'] ?? 0) <=> intval($a['points'] ?? 0));
+						$weight = 0;
+						foreach ($hnHits as $hit) {
+							$points = intval($hit['points'] ?? 0);
+							$post_score = log10($points + 10) * $scale;
 							$degrees += $post_score / pow(2, $weight);
+							$weight++;
 						}
 					}
 				}
 			}
 
-			// 4. SearXNG API (dynamique)
-			$searxBaseUrl = '';
-			if (isset(FreshRSS_Context::$user_conf) && isset(FreshRSS_Context::$user_conf->heatmap_searxng_url)) {
-				$searxBaseUrl = trim(FreshRSS_Context::$user_conf->heatmap_searxng_url);
+			// 2. Reddit API
+			if ($enableReddit) {
+				$redditRaw = $this->fetchUrl("https://www.reddit.com/api/info.json?url={$encodedUrl}", $timeout);
+				if ($redditRaw) {
+					$redditData = json_decode($redditRaw, true);
+					if (isset($redditData['data']['children']) && is_array($redditData['data']['children'])) {
+						$subreddits = [];
+						foreach ($redditData['data']['children'] as $post) {
+							$sub = $post['data']['subreddit'] ?? 'unknown';
+							$subreddits[$sub][] = intval($post['data']['ups'] ?? 0);
+						}
+						foreach ($subreddits as $sub => $upsList) {
+							rsort($upsList);
+							foreach ($upsList as $weight => $ups) {
+								$post_score = log10($ups + 10) * $scale;
+								$degrees += $post_score / pow(2, $weight);
+							}
+						}
+					}
+				}
 			}
 
-			if (!empty($searxBaseUrl)) {
+			// 3. SearXNG API
+			if ($enableSearx && !empty($searxBaseUrl)) {
 				$searxApiUrl = rtrim($searxBaseUrl, '/') . "/search?q={$encodedUrl}&format=json";
-				$searxRaw = $this->fetchUrl($searxApiUrl);
+				$searxRaw = $this->fetchUrl($searxApiUrl, $timeout);
 				if ($searxRaw) {
 					$searxData = json_decode($searxRaw, true);
 					if (isset($searxData['results']) && is_array($searxData['results'])) {
