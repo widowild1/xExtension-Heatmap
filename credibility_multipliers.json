@@ -1,0 +1,13 @@
+{
+  "reuters.com": 1.5,
+  "apnews.com": 1.5,
+  "github.com": 1.5,
+  "bloomberg.com": 1.5,
+  "bbc.com": 1.5,
+  "npr.org": 1.5,
+  "thesun.co.uk": 0.2,
+  "dailymail.co.uk": 0.2,
+  "nypost.com": 0.2,
+  "foxnews.com": 0.2,
+  "buzzfeed.com": 0.2
+}
