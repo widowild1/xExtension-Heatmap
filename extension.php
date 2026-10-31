@@ -36,6 +36,8 @@ class HeatmapExtension extends Minz_Extension {
 		$url =$entry->link();
 		$id =$entry->id();
 		$pubdate =$entry->date(true);
+		$rawTitle =$entry->title();
+		$cleanTitle = strip_tags($rawTitle);
 		
 		static $i18nInjected = false;
 		$i18nHtml = '';
@@ -53,8 +55,8 @@ class HeatmapExtension extends Minz_Extension {
 		}
 		
 		$titleAttr = htmlspecialchars(_t('ext.heatmap.click_to_recalculate'), ENT_QUOTES, 'UTF-8');
-		$badge =$i18nHtml . '<span class="ext-heatmap-badge" data-url="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" data-id="' . $id . '" data-pubdate="' . $pubdate . '" title="' . $titleAttr . '">🌡️...</span> ';
-		$entry->_title($badge .$entry->title());
+		$badge =$i18nHtml . '<span class="ext-heatmap-badge" data-url="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" data-id="' . $id . '" data-pubdate="' . $pubdate . '" data-title="' . htmlspecialchars($cleanTitle, ENT_QUOTES, 'UTF-8') . '" title="' . $titleAttr . '">🌡️...</span> ';
+		$entry->_title($badge .$rawTitle);
 		
 		return $entry;
 	}
