@@ -146,10 +146,8 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		return $cleanUrl;
 	}
 
-	// Gestionnaire de requêtes HTTP parallèles via curl_multi
-	private function fetchUrlsMulti(array $requests, int $timeout = 3): array {
+	private function fetchUrlsMulti(array $requests, int $timeout = 3, array $customHeaders = []): array {
 		if (!function_exists('curl_multi_init')) {
-			// Fallback séquentiel
 			$results = [];
 			foreach ($requests as $key => $url) {
 				if (empty($url)) {
@@ -163,6 +161,9 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 				curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
 				curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (FreshRSS Heatmap)');
+				if (!empty($customHeaders[$key])) {
+					curl_setopt($ch, CURLOPT_HTTPHEADER, $customHeaders[$key]);
+				}
 				$response = curl_exec($ch);
 				$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 				curl_close($ch);
@@ -188,9 +189,12 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 			curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
 			curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (FreshRSS Heatmap)');
+			if (!empty($customHeaders[$key])) {
+				curl_setopt($ch, CURLOPT_HTTPHEADER, $customHeaders[$key]);
+			}
 			curl_multi_add_handle($mh, $ch);
 			$chList[$key] = $ch;
-			$results[$key] = false; // default
+			$results[$key] = false;
 		}
 
 		if (empty($chList)) {
@@ -295,6 +299,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			$enableHN = $userConf->heatmap_enable_hn ?? true;
 			$enableReddit = $userConf->heatmap_enable_reddit ?? true;
 			$enableSearx = $userConf->heatmap_enable_searxng ?? true;
+			$enableHister = $userConf->heatmap_enable_hister ?? false;
 			$enableBsky = $userConf->heatmap_enable_bsky ?? true;
 			$enableWikipedia = $userConf->heatmap_enable_wikipedia ?? true;
 			$enableLobsters = $userConf->heatmap_enable_lobsters ?? true;
@@ -303,6 +308,9 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			$enableGithub = $userConf->heatmap_enable_github ?? false;
 
 			$searxBaseUrl = trim($userConf->heatmap_searxng_url ?? '');
+			$histerBaseUrl = trim($userConf->heatmap_hister_url ?? '');
+			$histerToken = trim($userConf->heatmap_hister_token ?? '');
+			
 			$timeout = intval($userConf->heatmap_timeout ?? 3);
 			if ($timeout < 1 || $timeout > 10) $timeout = 3;
 
@@ -314,6 +322,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				'hn' => ['points' => 0, 'mentions' => 0],
 				'reddit' => ['ups' => 0, 'mentions' => 0],
 				'searxng' => ['sources' => 0],
+				'hister' => ['matches' => 0],
 				'bsky' => ['reposts' => 0, 'likes' => 0],
 				'wikipedia' => ['citations' => 0],
 				'lobsters' => ['score' => 0, 'comments' => 0],
@@ -322,8 +331,9 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				'github' => ['mentions' => 0],
 			];
 
-			// PRÉPARATION DES REQUÊTES PARALLÈLES (Vague 1 : Recherche exacte par URL)
+			// VAGUE 1 : Requêtes simultanées
 			$requests = [];
+			$headers = [];
 			
 			if ($enableHN) {
 				$requests['hn'] = "https://hn.algolia.com/api/v1/search?query={$encodedUrl}&restrictSearchableAttributes=url";
@@ -334,6 +344,15 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			if ($enableSearx && !empty($searxBaseUrl)) {
 				$q = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
 				$requests['searxng'] = rtrim($searxBaseUrl, '/') . "/search?q=" . urlencode($q) . "&format=json";
+			}
+			if ($enableHister && !empty($histerBaseUrl)) {
+				$hQ = !empty($cleanTitle) ? '"' . $cleanTitle . '"' : $url;
+				$requests['hister'] = rtrim($histerBaseUrl, '/') . "/api/search?q=" . urlencode($hQ);
+				if (!empty($histerToken)) {
+					$headers['hister'] = ['Authorization: Bearer ' . $histerToken, 'Accept: application/json'];
+				} else {
+					$headers['hister'] = ['Accept: application/json'];
+				}
 			}
 			if ($enableBsky) {
 				$requests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={$encodedUrl}&limit=25";
@@ -358,40 +377,32 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				$requests['github'] = "https://api.github.com/search/issues?q={$encodedUrl}+in:body";
 			}
 
-			// EXÉCUTION DE LA VAGUE 1
-			$responses = $this->fetchUrlsMulti($requests, $timeout);
+			$responses = $this->fetchUrlsMulti($requests, $timeout, $headers);
 
-			// PRÉPARATION DES REQUÊTES DE REPLI (Vague 2 : Recherche par Titre si vide)
+			// VAGUE 2 : Repli par Titre si vide
 			$fallbackRequests = [];
-			
-			// Vérification HN
 			$hnData = !empty($responses['hn']) ? json_decode($responses['hn'], true) : null;
 			if ($enableHN && empty($hnData['hits']) && !empty($cleanTitle)) {
 				$fallbackRequests['hn'] = "https://hn.algolia.com/api/v1/search?query=" . urlencode($cleanTitle) . "&tags=story&hitsPerPage=3";
 			}
 			
-			// Vérification Reddit
 			$redditData = !empty($responses['reddit']) ? json_decode($responses['reddit'], true) : null;
 			if ($enableReddit && empty($redditData['data']['children']) && !empty($cleanTitle)) {
 				$fallbackRequests['reddit'] = "https://www.reddit.com/search.json?q=" . urlencode('"' . $cleanTitle . '"') . "&sort=relevance&limit=3";
 			}
 			
-			// Vérification Bluesky
 			$bskyData = !empty($responses['bsky']) ? json_decode($responses['bsky'], true) : null;
 			if ($enableBsky && empty($bskyData['posts']) && !empty($cleanTitle)) {
 				$fallbackRequests['bsky'] = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=" . urlencode('"' . $cleanTitle . '"') . "&limit=10";
 			}
 			
-			// Vérification Lobsters
 			$lobstersData = !empty($responses['lobsters']) ? json_decode($responses['lobsters'], true) : null;
 			if ($enableLobsters && empty($lobstersData) && !empty($cleanTitle)) {
 				$fallbackRequests['lobsters'] = "https://lobste.rs/search.json?q=" . urlencode($cleanTitle) . "&what=stories";
 			}
 
-			// EXÉCUTION DE LA VAGUE 2 (si nécessaire)
 			if (!empty($fallbackRequests)) {
 				$fallbackResponses = $this->fetchUrlsMulti($fallbackRequests, $timeout);
-				// Remplacement des données vides par les résultats de repli
 				if (isset($fallbackResponses['hn']) && $fallbackResponses['hn'] !== false) {
 					$hnData = json_decode($fallbackResponses['hn'], true);
 				}
@@ -406,7 +417,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// ANALYSE DES RÉSULTATS FINAUX & SCORING
+			// SCORING
 			// 1. Hacker News
 			if (isset($hnData['hits']) && is_array($hnData['hits'])) {
 				$hnHits = $hnData['hits'];
@@ -465,7 +476,19 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 4. Bluesky
+			// 4. Hister (Moteur personnel privé)
+			if ($enableHister && !empty($responses['hister'])) {
+				$histerData = json_decode($responses['hister'], true);
+				$hResults = $histerData['results'] ?? $histerData['documents'] ?? (is_array($histerData) ? $histerData : []);
+				$hCount = count($hResults);
+				if ($hCount > 0) {
+					$details['hister']['matches'] = $hCount;
+					// Bonus de pertinence personnelle : +2.5°F de base + logarithme des correspondances
+					$degrees += 2.5 + (log10($hCount + 10) * $scale);
+				}
+			}
+
+			// 5. Bluesky
 			if (isset($bskyData['posts']) && is_array($bskyData['posts'])) {
 				$totalEngage = 0;
 				foreach ($bskyData['posts'] as $post) {
@@ -481,7 +504,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 5. Wikipédia
+			// 6. Wikipédia
 			if ($enableWikipedia) {
 				$citations = 0;
 				if (!empty($responses['wikipedia_fr'])) {
@@ -498,7 +521,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 6. Lobste.rs
+			// 7. Lobste.rs
 			if (is_array($lobstersData) && !empty($lobstersData)) {
 				$weight = 0;
 				foreach ($lobstersData as $story) {
@@ -511,7 +534,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 7. Lemmy
+			// 8. Lemmy
 			if ($enableLemmy && !empty($responses['lemmy'])) {
 				$lemmyData = json_decode($responses['lemmy'], true);
 				if (isset($lemmyData['posts']) && is_array($lemmyData['posts'])) {
@@ -528,7 +551,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 8. Wayback Machine
+			// 9. Wayback Machine
 			if ($enableWayback && !empty($responses['wayback'])) {
 				$wbData = json_decode($responses['wayback'], true);
 				if (!empty($wbData['archived_snapshots']['closest']['available'])) {
@@ -537,7 +560,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			}
 
-			// 9. GitHub
+			// 10. GitHub
 			if ($enableGithub && !empty($responses['github'])) {
 				$ghData = json_decode($responses['github'], true);
 				$ghCount = intval($ghData['total_count'] ?? 0);
