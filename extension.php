@@ -21,6 +21,12 @@ class HeatmapExtension extends Minz_Extension {
 			FreshRSS_Context::$user_conf->heatmap_enable_searxng = Minz_Request::param('enable_searxng', 0) ? true : false;
 			FreshRSS_Context::$user_conf->heatmap_enable_hn = Minz_Request::param('enable_hn', 0) ? true : false;
 			FreshRSS_Context::$user_conf->heatmap_enable_reddit = Minz_Request::param('enable_reddit', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_bsky = Minz_Request::param('enable_bsky', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_wikipedia = Minz_Request::param('enable_wikipedia', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_lobsters = Minz_Request::param('enable_lobsters', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_lemmy = Minz_Request::param('enable_lemmy', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_wayback = Minz_Request::param('enable_wayback', 0) ? true : false;
+			FreshRSS_Context::$user_conf->heatmap_enable_github = Minz_Request::param('enable_github', 0) ? true : false;
 			
 			$timeout = intval(Minz_Request::param('timeout', 3));
 			FreshRSS_Context::$user_conf->heatmap_timeout = ($timeout >= 1 && $timeout <= 10) ?$timeout : 3;
