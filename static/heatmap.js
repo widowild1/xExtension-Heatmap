@@ -11,6 +11,7 @@ const getI18n = () => {
         noUrl: '🌡️ No URL',
         errData: '🌡️ Err Data',
         errFetch: '🌡️ Err Fetch',
+        unit: 'F'
     };
 };
 
@@ -39,7 +40,7 @@ const processBadge = (badge, force = false) => {
         })
         .then(data => {
             if (data && data.score !== undefined) {
-                updateBadgeUI(badge, data.score, data.frozen);
+                updateBadgeUI(badge, data.score, data.frozen, data.details, i18n);
             } else {
                 badge.innerText = i18n.errData;
             }
@@ -50,17 +51,26 @@ const processBadge = (badge, force = false) => {
         });
 };
 
-const updateBadgeUI = (badge, score, frozen) => {
+const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
+    let displayScore = fahrenheitScore;
+    let symbol = '°F';
+    
+    // Conversion Celsius : C = (F - 32) * 5/9
+    if (i18n.unit === 'C') {
+        displayScore = (fahrenheitScore - 32) * (5/9);
+        symbol = '°C';
+    }
+    
     let emoji = '❄️';
     let className = 'ext-heatmap-cold';
     
-    if (score >= 104) {
+    if (fahrenheitScore >= 104) {
         emoji = '🌋';
         className = 'ext-heatmap-viral';
-    } else if (score >= 101) {
+    } else if (fahrenheitScore >= 101) {
         emoji = '🔥';
         className = 'ext-heatmap-hot';
-    } else if (score > 98.6) {
+    } else if (fahrenheitScore > 98.6) {
         emoji = '🤒';
         className = 'ext-heatmap-warm';
     } else {
@@ -69,15 +79,31 @@ const updateBadgeUI = (badge, score, frozen) => {
 
     badge.className = `ext-heatmap-badge ${className}`;
     
-    let text = `${emoji} ${score.toFixed(1)}°F`;
+    let text = `${emoji} ${displayScore.toFixed(1)}${symbol}`;
     if (frozen) {
         text += ' 🛑';
     }
-    
     badge.innerText = text;
+    
+    // Infobulle détaillée au survol
+    if (details) {
+        let title = '';
+        if (details.hn && details.hn.mentions > 0) {
+            title += `HackerNews: ${details.hn.points} pts (${details.hn.mentions} mentions)\n`;
+        }
+        if (details.reddit && details.reddit.mentions > 0) {
+            title += `Reddit: ${details.reddit.ups} upvotes (${details.reddit.mentions} posts)\n`;
+        }
+        if (details.searxng && details.searxng.sources > 0) {
+            title += `SearXNG: ${details.searxng.sources} sources\n`;
+        }
+        if (!title) {
+            title = 'Aucune mention externe trouvée pour le moment.';
+        }
+        badge.setAttribute('title', title.trim());
+    }
 };
 
-// IntersectionObserver pour le lazy loading
 let badgeObserver = null;
 if ('IntersectionObserver' in window) {
     badgeObserver = new IntersectionObserver((entries, observer) => {
@@ -124,11 +150,11 @@ const sortFeedsByHeat = () => {
         let scoreB = -1;
         
         if (badgeA) {
-            const matchA = badgeA.innerText.match(/([\d.]+)°F/);
+            const matchA = badgeA.innerText.match(/([\d.]+)(°C|°F)/);
             if (matchA) scoreA = parseFloat(matchA[1]);
         }
         if (badgeB) {
-            const matchB = badgeB.innerText.match(/([\d.]+)°F/);
+            const matchB = badgeB.innerText.match(/([\d.]+)(°C|°F)/);
             if (matchB) scoreB = parseFloat(matchB[1]);
         }
         
