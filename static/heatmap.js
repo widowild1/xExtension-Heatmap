@@ -6,8 +6,10 @@ const getI18n = () => {
         } catch (e) {}
     }
     return {
-        sortByHeat: '🔥 Sort by Heat',
-        sorted: '🔥 Sorted!',
+        sortByHeat: '🔥 Trier par popularité',
+        sorted: '🔥 Trié !',
+        filterCold: '❄️ Masquer articles froids',
+        showAll: '👁️ Tout afficher',
         noUrl: '🌡️ No URL',
         errData: '🌡️ Err Data',
         errFetch: '🌡️ Err Fetch',
@@ -78,6 +80,7 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     }
 
     badge.className = `ext-heatmap-badge ${className}`;
+    badge.dataset.isCold = (fahrenheitScore <= 98.6) ? 'true' : 'false';
     
     let text = `${emoji} ${displayScore.toFixed(1)}${symbol}`;
     if (frozen) {
@@ -86,9 +89,13 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     badge.innerText = text;
     
     if (details) {
+        if (details.discussion_url) {
+            badge.dataset.discussionUrl = details.discussion_url;
+        }
+
         let lines = [];
         if (details.hister && details.hister.matches > 0) {
-            lines.push(`🔖 Hister: ${details.hister.matches} élément(s) dans votre index personnel`);
+            lines.push(`🔖 Hister: ${details.hister.matches} élément(s) dans votre index`);
         }
         if (details.hn && details.hn.mentions > 0) {
             lines.push(`HackerNews: ${details.hn.points} pts (${details.hn.mentions} posts)`);
@@ -118,6 +125,10 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
             lines.push(`Wayback Machine: Présent dans les archives`);
         }
         
+        if (details.discussion_url) {
+            lines.push(`\n🔗 Astuce : Ctrl + Clic pour ouvrir la discussion`);
+        }
+        
         badge.setAttribute('title', lines.length > 0 ? lines.join('\n') : 'Aucune mention externe trouvée.');
     }
 };
@@ -143,6 +154,11 @@ const initBadges = () => {
             badge.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Ctrl + Clic (ou Cmd + Clic) ouvre directement la discussion
+                if ((e.ctrlKey || e.metaKey) && badge.dataset.discussionUrl) {
+                    window.open(badge.dataset.discussionUrl, '_blank', 'noopener,noreferrer');
+                    return;
+                }
                 processBadge(badge, true);
             };
             if (badgeObserver) {
@@ -195,40 +211,69 @@ const sortFeedsByHeat = () => {
     if (btnNav) btnNav.innerText = i18n.sorted;
 };
 
-const addSortButtonToNav = () => {
-    if (document.getElementById('ext-heatmap-sort-btn-nav')) return;
+// Bascule du filtre pour masquer les articles froids
+let isColdFiltered = false;
+const toggleFilterCold = () => {
+    isColdFiltered = !isColdFiltered;
+    const i18n = getI18n();
+    const btnFilter = document.getElementById('ext-heatmap-filter-btn-nav');
     
+    const entries = document.querySelectorAll('.flux');
+    entries.forEach(entry => {
+        const badge = entry.querySelector('.ext-heatmap-badge');
+        if (badge && badge.dataset.isCold === 'true') {
+            entry.style.display = isColdFiltered ? 'none' : '';
+        }
+    });
+
+    if (btnFilter) {
+        btnFilter.innerText = isColdFiltered ? i18n.showAll : i18n.filterCold;
+    }
+};
+
+const addNavbarControls = () => {
     const navMenu = document.querySelector('#nav_menu');
     if (!navMenu) return;
     
     const i18n = getI18n();
-    const sortLi = document.createElement('li');
-    sortLi.className = 'item';
-    
-    const sortBtn = document.createElement('a');
-    sortBtn.id = 'ext-heatmap-sort-btn-nav';
-    sortBtn.innerText = i18n.sortByHeat;
-    sortBtn.onclick = (e) => {
-        e.preventDefault();
-        sortFeedsByHeat();
-    };
 
-    sortLi.appendChild(sortBtn);
-    
-    const toggleViewBtn = navMenu.querySelector('.toggle_view');
-    if (toggleViewBtn) {
-        navMenu.insertBefore(sortLi, toggleViewBtn);
-    } else {
+    // 1. Bouton de tri
+    if (!document.getElementById('ext-heatmap-sort-btn-nav')) {
+        const sortLi = document.createElement('li');
+        sortLi.className = 'item';
+        const sortBtn = document.createElement('a');
+        sortBtn.id = 'ext-heatmap-sort-btn-nav';
+        sortBtn.innerText = i18n.sortByHeat;
+        sortBtn.onclick = (e) => {
+            e.preventDefault();
+            sortFeedsByHeat();
+        };
+        sortLi.appendChild(sortBtn);
         navMenu.appendChild(sortLi);
+    }
+
+    // 2. Bouton de filtrage des articles froids
+    if (!document.getElementById('ext-heatmap-filter-btn-nav')) {
+        const filterLi = document.createElement('li');
+        filterLi.className = 'item';
+        const filterBtn = document.createElement('a');
+        filterBtn.id = 'ext-heatmap-filter-btn-nav';
+        filterBtn.innerText = isColdFiltered ? i18n.showAll : i18n.filterCold;
+        filterBtn.onclick = (e) => {
+            e.preventDefault();
+            toggleFilterCold();
+        };
+        filterLi.appendChild(filterBtn);
+        navMenu.appendChild(filterLi);
     }
 };
 
 initBadges();
-addSortButtonToNav();
+addNavbarControls();
 
 document.addEventListener('DOMContentLoaded', () => {
     initBadges();
-    addSortButtonToNav();
+    addNavbarControls();
 });
 
 const setupObserver = () => {
@@ -236,10 +281,10 @@ const setupObserver = () => {
         setTimeout(setupObserver, 100);
         return;
     }
-    const observer = new MutationObserver((mutations) => {
+    const observer = new MutationObserver(() => {
         initBadges();
-        if (!document.getElementById('ext-heatmap-sort-btn-nav') && document.querySelector('#nav_menu')) {
-            addSortButtonToNav();
+        if ((!document.getElementById('ext-heatmap-sort-btn-nav') || !document.getElementById('ext-heatmap-filter-btn-nav')) && document.querySelector('#nav_menu')) {
+            addNavbarControls();
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });
