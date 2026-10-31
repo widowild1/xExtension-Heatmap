@@ -87,6 +87,9 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
     
     if (details) {
         let lines = [];
+        if (details.hister && details.hister.matches > 0) {
+            lines.push(`🔖 Hister: ${details.hister.matches} élément(s) dans votre index personnel`);
+        }
         if (details.hn && details.hn.mentions > 0) {
             lines.push(`HackerNews: ${details.hn.points} pts (${details.hn.mentions} posts)`);
         }
@@ -192,12 +195,11 @@ const sortFeedsByHeat = () => {
     if (btnNav) btnNav.innerText = i18n.sorted;
 };
 
-// Intégration du bouton dans la barre d'outils (nav_menu)
 const addSortButtonToNav = () => {
     if (document.getElementById('ext-heatmap-sort-btn-nav')) return;
     
     const navMenu = document.querySelector('#nav_menu');
-    if (!navMenu) return; // Si la page n'a pas de menu (ex: paramètres)
+    if (!navMenu) return;
     
     const i18n = getI18n();
     const sortLi = document.createElement('li');
@@ -236,7 +238,6 @@ const setupObserver = () => {
     }
     const observer = new MutationObserver((mutations) => {
         initBadges();
-        // Vérifie si le menu de navigation a été recréé en AJAX par FreshRSS
         if (!document.getElementById('ext-heatmap-sort-btn-nav') && document.querySelector('#nav_menu')) {
             addSortButtonToNav();
         }
