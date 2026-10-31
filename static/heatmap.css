@@ -15,7 +15,6 @@
 .ext-heatmap-hot { background-color: #ffe0b2; border: 1px solid #ffcc80; }
 .ext-heatmap-viral { background-color: #ffcdd2; border: 1px solid #ef9a9a; font-weight: bold; }
 
-/* Dark mode compatibility based on standard FreshRSS variables/strategies */
 @media (prefers-color-scheme: dark) {
     .ext-heatmap-cold { background-color: rgba(0, 150, 136, 0.2); border: 1px solid rgba(0, 150, 136, 0.4); color: #e0f2f1; }
     .ext-heatmap-warm { background-color: rgba(255, 235, 59, 0.2); border: 1px solid rgba(255, 235, 59, 0.4); color: #fff9c4; }
@@ -39,8 +38,8 @@ body.theme-dark .ext-heatmap-viral,
 html.dark .ext-heatmap-viral,
 .night-mode .ext-heatmap-viral { background-color: rgba(244, 67, 54, 0.3); border: 1px solid rgba(244, 67, 54, 0.5); color: #ffcdd2; }
 
-/* Move Sort Button to Navbar */
-#ext-heatmap-sort-btn-nav {
+#ext-heatmap-sort-btn-nav,
+#ext-heatmap-filter-btn-nav {
     display: inline-block;
     vertical-align: middle;
     padding: 0 10px;
@@ -50,6 +49,12 @@ html.dark .ext-heatmap-viral,
     font-weight: bold;
     color: #ff5722;
 }
-#ext-heatmap-sort-btn-nav:hover {
+
+#ext-heatmap-filter-btn-nav {
+    color: #00bcd4;
+}
+
+#ext-heatmap-sort-btn-nav:hover,
+#ext-heatmap-filter-btn-nav:hover {
     text-decoration: underline;
 }
