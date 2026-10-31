@@ -7,10 +7,29 @@ class HeatmapExtension extends Minz_Extension {
 
 		Minz_Extension::registerHook('entry_before_display', [$this, 'injectHeatmapUI']);
 		
+		// 1. Pré-calcul automatique en arrière-plan à la réception de nouveaux articles
+		if (FreshRSS_Context::$user_conf->heatmap_enable_precalc ?? true) {
+			Minz_Extension::registerHook('entry_before_insert', [$this, 'precalculateScore']);
+		}
+
 		$this->registerController('heatmap');$this->registerController('Heatmap');
 		
 		Minz_View::appendScript($this->getFileUrl('heatmap.js', 'js'));
 		Minz_View::appendStyle($this->getFileUrl('heatmap.css', 'css'));
+	}
+
+	public function precalculateScore($entry) {
+		if ($entry == null) {
+			return $entry;
+		}
+
+		require_once __DIR__ . '/Controllers/heatmapController.php';
+		$controller = new FreshExtension_heatmap_Controller();$controller->firstAction();
+		$controller->calculateAndStoreScore($entry->link(),
+			$entry->title(),$entry->date(true)
+		);
+
+		return $entry;
 	}
 
 	public function handleConfigureAction() {
@@ -20,7 +39,9 @@ class HeatmapExtension extends Minz_Extension {
 			FreshRSS_Context::$user_conf->heatmap_searxng_url = rtrim(trim(Minz_Request::param('searxng_url', '')), '/');
 			FreshRSS_Context::$user_conf->heatmap_hister_url = rtrim(trim(Minz_Request::param('hister_url', '')), '/');
 			FreshRSS_Context::$user_conf->heatmap_hister_token = trim(Minz_Request::param('hister_token', ''));
+			FreshRSS_Context::$user_conf->heatmap_github_token = trim(Minz_Request::param('github_token', ''));
 			
+			FreshRSS_Context::$user_conf->heatmap_enable_precalc = Minz_Request::param('enable_precalc', 0) ? true : false;
 			FreshRSS_Context::$user_conf->heatmap_enable_hister = Minz_Request::param('enable_hister', 0) ? true : false;
 			FreshRSS_Context::$user_conf->heatmap_enable_searxng = Minz_Request::param('enable_searxng', 0) ? true : false;
 			FreshRSS_Context::$user_conf->heatmap_enable_hn = Minz_Request::param('enable_hn', 0) ? true : false;
@@ -56,6 +77,8 @@ class HeatmapExtension extends Minz_Extension {
 			$i18n = [
 				'sortByHeat' => _t('ext.heatmap.sort_by_heat'),
 				'sorted' => _t('ext.heatmap.sorted'),
+				'filterCold' => _t('ext.heatmap.filter_cold'),
+				'showAll' => _t('ext.heatmap.show_all'),
 				'noUrl' => _t('ext.heatmap.no_url'),
 				'errData' => _t('ext.heatmap.err_data'),
 				'errFetch' => _t('ext.heatmap.err_fetch'),
