@@ -1,3 +1,8 @@
+<?php
+if (method_exists($this, 'registerTranslates')) {
+    $this->registerTranslates();
+}
+?>
 <form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
     <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
 
