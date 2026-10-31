@@ -1,96 +1,155 @@
 <?php
-
-class HeatmapExtension extends Minz_Extension {
-	
-	public function init() {
-		$this->registerTranslates();
-
-		Minz_Extension::registerHook('entry_before_display', [$this, 'injectHeatmapUI']);
-		
-		// 1. Pré-calcul automatique en arrière-plan à la réception de nouveaux articles
-		if (FreshRSS_Context::$user_conf->heatmap_enable_precalc ?? true) {
-			Minz_Extension::registerHook('entry_before_insert', [$this, 'precalculateScore']);
-		}
-
-		$this->registerController('heatmap');$this->registerController('Heatmap');
-		
-		Minz_View::appendScript($this->getFileUrl('heatmap.js', 'js'));
-		Minz_View::appendStyle($this->getFileUrl('heatmap.css', 'css'));
-	}
-
-	public function precalculateScore($entry) {
-		if ($entry == null) {
-			return $entry;
-		}
-
-		require_once __DIR__ . '/Controllers/heatmapController.php';
-		$controller = new FreshExtension_heatmap_Controller();$controller->firstAction();
-		$controller->calculateAndStoreScore($entry->link(),
-			$entry->title(),$entry->date(true)
-		);
-
-		return $entry;
-	}
-
-	public function handleConfigureAction() {
-		$this->registerTranslates();
-
-		if (Minz_Request::isPost()) {
-			FreshRSS_Context::$user_conf->heatmap_searxng_url = rtrim(trim(Minz_Request::param('searxng_url', '')), '/');
-			FreshRSS_Context::$user_conf->heatmap_hister_url = rtrim(trim(Minz_Request::param('hister_url', '')), '/');
-			FreshRSS_Context::$user_conf->heatmap_hister_token = trim(Minz_Request::param('hister_token', ''));
-			FreshRSS_Context::$user_conf->heatmap_github_token = trim(Minz_Request::param('github_token', ''));
-			
-			FreshRSS_Context::$user_conf->heatmap_enable_precalc = Minz_Request::param('enable_precalc', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_hister = Minz_Request::param('enable_hister', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_searxng = Minz_Request::param('enable_searxng', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_hn = Minz_Request::param('enable_hn', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_reddit = Minz_Request::param('enable_reddit', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_bsky = Minz_Request::param('enable_bsky', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_wikipedia = Minz_Request::param('enable_wikipedia', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_lobsters = Minz_Request::param('enable_lobsters', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_lemmy = Minz_Request::param('enable_lemmy', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_wayback = Minz_Request::param('enable_wayback', 0) ? true : false;
-			FreshRSS_Context::$user_conf->heatmap_enable_github = Minz_Request::param('enable_github', 0) ? true : false;
-			
-			$timeout = intval(Minz_Request::param('timeout', 3));
-			FreshRSS_Context::$user_conf->heatmap_timeout = ($timeout >= 1 && $timeout <= 10) ?$timeout : 3;
-			
-			$unit = Minz_Request::param('temp_unit', 'F');
-			FreshRSS_Context::$user_conf->heatmap_unit = ($unit === 'C') ? 'C' : 'F';
-			
-			FreshRSS_Context::$user_conf->save();
-		}
-	}
-
-	public function injectHeatmapUI($entry) {
-		$url =$entry->link();
-		$id =$entry->id();
-		$pubdate =$entry->date(true);
-		$rawTitle =$entry->title();
-		$cleanTitle = strip_tags($rawTitle);
-		
-		static $i18nInjected = false;
-		$i18nHtml = '';
-		if (!$i18nInjected) {$i18nInjected = true;
-			$unit = FreshRSS_Context::$user_conf->heatmap_unit ?? 'F';
-			$i18n = [
-				'sortByHeat' => _t('ext.heatmap.sort_by_heat'),
-				'sorted' => _t('ext.heatmap.sorted'),
-				'filterCold' => _t('ext.heatmap.filter_cold'),
-				'showAll' => _t('ext.heatmap.show_all'),
-				'noUrl' => _t('ext.heatmap.no_url'),
-				'errData' => _t('ext.heatmap.err_data'),
-				'errFetch' => _t('ext.heatmap.err_fetch'),
-				'unit' => $unit
-			];
-			$i18nHtml = '<script id="heatmap-i18n" type="application/json">' . json_encode($i18n) . '</script>';
-		}
-		
-		$titleAttr = htmlspecialchars(_t('ext.heatmap.click_to_recalculate'), ENT_QUOTES, 'UTF-8');
-		$badge =$i18nHtml . '<span class="ext-heatmap-badge" data-url="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" data-id="' . $id . '" data-pubdate="' . $pubdate . '" data-title="' . htmlspecialchars($cleanTitle, ENT_QUOTES, 'UTF-8') . '" title="' . $titleAttr . '">🌡️...</span> ';
-		$entry->_title($badge .$rawTitle);
-		
-		return $entry;
-	}
+if (method_exists($this, 'registerTranslates')) {
+    $this->registerTranslates();
 }
+$current_unit = FreshRSS_Context::$user_conf->heatmap_unit ?? 'F';
+?>
+<form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
+    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+
+    <!-- Performance & Pré-calcul -->
+    <div class="form-group">
+        <label class="group-name"><?php echo _t('ext.heatmap.precalc_section'); ?></label>
+        <div class="group-controls">
+            <label class="checkbox">
+                <input type="checkbox" name="enable_precalc" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_precalc ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_precalc'); ?>
+            </label>
+            <p class="help"><?php echo _t('ext.heatmap.enable_precalc_help'); ?></p>
+        </div>
+    </div>
+
+    <!-- SearXNG -->
+    <div class="form-group">
+        <label class="group-name" for="searxng_url"><?php echo _t('ext.heatmap.searxng_url'); ?></label>
+        <div class="group-controls">
+            <input type="url" 
+                   id="searxng_url" 
+                   name="searxng_url" 
+                   value="<?php echo htmlspecialchars(FreshRSS_Context::$user_conf->heatmap_searxng_url ?? '', ENT_QUOTES, 'UTF-8'); ?>" 
+                   placeholder="http://192.168.1.50:8080 ou https://searxng.example.com" 
+                   style="width: 100%; max-width: 480px;" />
+            <p class="help"><?php echo _t('ext.heatmap.searxng_help'); ?></p>
+        </div>
+    </div>
+
+    <!-- Hister -->
+    <div class="form-group">
+        <label class="group-name" for="hister_url"><?php echo _t('ext.heatmap.hister_url'); ?></label>
+        <div class="group-controls">
+            <input type="url" 
+                   id="hister_url" 
+                   name="hister_url" 
+                   value="<?php echo htmlspecialchars(FreshRSS_Context::$user_conf->heatmap_hister_url ?? '', ENT_QUOTES, 'UTF-8'); ?>" 
+                   placeholder="http://127.0.0.1:4433" 
+                   style="width: 100%; max-width: 480px;" />
+            <p class="help"><?php echo _t('ext.heatmap.hister_help'); ?></p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="hister_token"><?php echo _t('ext.heatmap.hister_token'); ?></label>
+        <div class="group-controls">
+            <input type="password" 
+                   id="hister_token" 
+                   name="hister_token" 
+                   value="<?php echo htmlspecialchars(FreshRSS_Context::$user_conf->heatmap_hister_token ?? '', ENT_QUOTES, 'UTF-8'); ?>" 
+                   placeholder="Optionnel" 
+                   style="width: 100%; max-width: 320px;" />
+            <p class="help"><?php echo _t('ext.heatmap.hister_token_help'); ?></p>
+        </div>
+    </div>
+
+    <!-- GitHub Token -->
+    <div class="form-group">
+        <label class="group-name" for="github_token"><?php echo _t('ext.heatmap.github_token'); ?></label>
+        <div class="group-controls">
+            <input type="password" 
+                   id="github_token" 
+                   name="github_token" 
+                   value="<?php echo htmlspecialchars(FreshRSS_Context::$user_conf->heatmap_github_token ?? '', ENT_QUOTES, 'UTF-8'); ?>" 
+                   placeholder="ghp_xxxxxxxxxxxx (Optionnel)" 
+                   style="width: 100%; max-width: 320px;" />
+            <p class="help"><?php echo _t('ext.heatmap.github_token_help'); ?></p>
+        </div>
+    </div>
+
+    <!-- Sources actives -->
+    <div class="form-group">
+        <label class="group-name"><?php echo _t('ext.heatmap.active_sources'); ?></label>
+        <div class="group-controls">
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_hister" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_hister ?? false) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_hister'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_searxng" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_searxng ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_searxng'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_hn" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_hn ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_hn'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_reddit" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_reddit ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_reddit'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_bsky" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_bsky ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_bsky'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_wikipedia" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_wikipedia ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_wikipedia'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_lobsters" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_lobsters ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_lobsters'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_lemmy" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_lemmy ?? false) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_lemmy'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_wayback" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_wayback ?? true) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_wayback'); ?>
+            </label>
+            <label class="checkbox" style="display: block; margin-bottom: 6px;">
+                <input type="checkbox" name="enable_github" value="1" <?php echo (FreshRSS_Context::$user_conf->heatmap_enable_github ?? false) ? 'checked="checked"' : ''; ?> />
+                <?php echo _t('ext.heatmap.enable_github'); ?>
+            </label>
+        </div>
+    </div>
+
+    <!-- Unité -->
+    <div class="form-group">
+        <label class="group-name" for="temp_unit"><?php echo _t('ext.heatmap.temp_unit'); ?></label>
+        <div class="group-controls">
+            <select name="temp_unit" id="temp_unit" style="width: 200px;">
+                <option value="C" <?php echo $current_unit === 'C' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.heatmap.temp_celsius'); ?></option>
+                <option value="F" <?php echo $current_unit === 'F' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.heatmap.temp_fahrenheit'); ?></option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Timeout -->
+    <div class="form-group">
+        <label class="group-name" for="timeout"><?php echo _t('ext.heatmap.timeout'); ?></label>
+        <div class="group-controls">
+            <input type="number" 
+                   id="timeout" 
+                   name="timeout" 
+                   min="1" 
+                   max="10" 
+                   value="<?php echo intval(FreshRSS_Context::$user_conf->heatmap_timeout ?? 3); ?>" 
+                   style="width: 80px;" />
+            <p class="help"><?php echo _t('ext.heatmap.timeout_help'); ?></p>
+        </div>
+    </div>
+
+    <div class="form-group form-actions">
+        <div class="group-controls">
+            <button type="submit" class="btn btn-important"><?php echo _t('ext.heatmap.save'); ?></button>
+        </div>
+    </div>
+</form>
