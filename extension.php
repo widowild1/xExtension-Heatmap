@@ -31,7 +31,22 @@ class HeatmapExtension extends Minz_Extension {
 		$id = $entry->id();
 		$pubdate = $entry->date(true);
 		
-		$badge = '<span class="ext-heatmap-badge" data-url="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" data-id="' . $id . '" data-pubdate="' . $pubdate . '" title="Cliquer pour recalculer">🌡️...</span> ';
+		static $i18nInjected = false;
+		$i18nHtml = '';
+		if (!$i18nInjected) {
+			$i18nInjected = true;
+			$i18n = [
+				'sortByHeat' => _t('ext.heatmap.sort_by_heat'),
+				'sorted' => _t('ext.heatmap.sorted'),
+				'noUrl' => _t('ext.heatmap.no_url'),
+				'errData' => _t('ext.heatmap.err_data'),
+				'errFetch' => _t('ext.heatmap.err_fetch'),
+			];
+			$i18nHtml = '<script id="heatmap-i18n" type="application/json">' . json_encode($i18n) . '</script>';
+		}
+		
+		$titleAttr = htmlspecialchars(_t('ext.heatmap.click_to_recalculate'), ENT_QUOTES, 'UTF-8');
+		$badge = $i18nHtml . '<span class="ext-heatmap-badge" data-url="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" data-id="' . $id . '" data-pubdate="' . $pubdate . '" title="' . $titleAttr . '">🌡️...</span> ';
 		$entry->_title($badge . $entry->title());
 		
 		return $entry;
