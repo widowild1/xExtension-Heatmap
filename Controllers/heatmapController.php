@@ -305,6 +305,10 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 	}
 
 	private function fetchUrlsMulti(array $requests, int $timeout = 3, array $customHeaders = []): array {
+		if (empty($requests)) {
+			return [];
+		}
+
 		if (!function_exists('curl_multi_init')) {
 			$results = [];
 			foreach ($requests as $key => $url) {
@@ -342,17 +346,18 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 
 		$active = null;
+		$startTime = microtime(true);
+		
 		do {
 			$mrc = curl_multi_exec($mh, $active);
 		} while ($mrc === CURLM_CALL_MULTI_PERFORM);
 
 		while ($active && $mrc === CURLM_OK) {
-			if (curl_multi_select($mh, 0.2) === -1) {
-				usleep(10000);
+			if (microtime(true) - $startTime > $timeout) {
+				break;
 			}
-			do {
-				$mrc = curl_multi_exec($mh, $active);
-			} while ($mrc === CURLM_CALL_MULTI_PERFORM);
+			curl_multi_exec($mh, $active);
+			usleep(15000);
 		}
 
 		foreach ($chList as $key => $ch) {

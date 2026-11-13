@@ -1,4 +1,4 @@
-const BATCH_DEBOUNCE_MS = 150;
+const BATCH_DEBOUNCE_MS = 250; // Augmenté pour mieux regrouper les appels lors du scroll rapide
 const BATCH_CHUNK_SIZE = 15;
 
 const getCsrfToken = () => {
@@ -121,18 +121,23 @@ const updateBadgeUI = (badge, fahrenheitScore, frozen, details, i18n) => {
 };
 
 const flushBatchQueue = () => {
-    batchTimer = null;
+    // Si d'autres éléments arrivent pendant l'exécution, on laisse le timer suivant s'en occuper
     if (batchQueue.length === 0) return;
 
     const csrfToken = getCsrfToken();
     if (!csrfToken && document.readyState === 'loading') {
-        batchTimer = setTimeout(flushBatchQueue, 50);
+        // En attente du DOM pour lire le CSRF
+        batchTimer = setTimeout(flushBatchQueue, 100);
         return;
     }
 
     const chunk = batchQueue.splice(0, BATCH_CHUNK_SIZE);
+    
+    // Si des éléments restent, on planifie immédiatement le lot suivant
     if (batchQueue.length > 0) {
         batchTimer = setTimeout(flushBatchQueue, BATCH_DEBOUNCE_MS);
+    } else {
+        batchTimer = null;
     }
 
     const i18n = getI18n();
@@ -217,9 +222,11 @@ const enqueueBadge = (badge) => {
     badge.innerText = '🌡️ ...';
     batchQueue.push(badge);
 
-    if (!batchTimer) {
-        batchTimer = setTimeout(flushBatchQueue, BATCH_DEBOUNCE_MS);
+    // Annule et redémarre le timer à chaque nouvel élément (Debounce pur)
+    if (batchTimer) {
+        clearTimeout(batchTimer);
     }
+    batchTimer = setTimeout(flushBatchQueue, BATCH_DEBOUNCE_MS);
 };
 
 const forceRecalculateBadge = (badge) => {
