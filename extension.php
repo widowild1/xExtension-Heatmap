@@ -30,7 +30,10 @@ class HeatmapExtension extends Minz_Extension {
 		$conf = FreshRSS_Context::$user_conf;
 		if ($conf !== null) {
 			foreach (self::$defaults as $key => $defaultVal) {
-				if (!isset($conf->$key)) {
+				$exists = method_exists($conf, 'has')
+					? $conf->has($key)
+					: (method_exists($conf, 'attribute') && $conf->attribute($key) !== null);
+				if (!$exists) {
 					$conf->$key = $defaultVal;
 				}
 			}
@@ -83,7 +86,7 @@ class HeatmapExtension extends Minz_Extension {
 	public function handleConfigureAction() {
 		$this->registerTranslates();
 
-		if (Minz_Request::isPost()) {
+		if (Minz_Request::isPost() && FreshRSS_Context::$user_conf !== null) {
 			$searxUrl = rtrim(trim((string)Minz_Request::param('searxng_url', '')), '/');
 			$histerUrl = rtrim(trim((string)Minz_Request::param('hister_url', '')), '/');
 
