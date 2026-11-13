@@ -726,7 +726,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			return;
 		}
 
-		$this->view->_layout(false);
+		$this->view->_layout(null);
 		header('Content-Type: application/json; charset=utf-8');
 
 		try {
@@ -761,7 +761,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			return;
 		}
 
-		$this->view->_layout(false);
+		$this->view->_layout(null);
 		header('Content-Type: application/json; charset=utf-8');
 
 		try {
