@@ -94,6 +94,16 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 	}
 
+	private function sendJson(array $payload, int $statusCode = 200): void {
+		while (ob_get_level() > 0) {
+			@ob_end_clean();
+		}
+		http_response_code($statusCode);
+		header('Content-Type: application/json; charset=utf-8');
+		echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		exit;
+	}
+
 	private function getUserConfValue(string $key, $default = null) {
 		$conf = FreshRSS_Context::$user_conf;
 		if ($conf === null) {
@@ -741,31 +751,28 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 
 		$this->view->_layout(null);
-		header('Content-Type: application/json; charset=utf-8');
 
 		try {
-			$rawUrl = (string)Minz_Request::param('url', '');
-			$rawTitle = (string)Minz_Request::param('title', '');
+			$rawUrl = (string)Minz_Request::param('url', '', true);
+			$rawTitle = (string)Minz_Request::param('title', '', true);
 			$pubdate = intval(Minz_Request::param('pubdate', 0));
 			$force = (bool)Minz_Request::param('force', 0);
 
 			if (!$this->isValidHttpUrl($rawUrl)) {
-				http_response_code(400);
-				echo json_encode(['error' => 'Invalid or missing HTTP URL']);
-				return;
+				$this->sendJson(['error' => 'Invalid or missing HTTP URL'], 400);
 			}
 
 			$result = $this->calculateAndStoreScore($rawUrl, $rawTitle, $pubdate, $force);
-			echo json_encode($result);
+			$this->sendJson($result, 200);
 		} catch (Throwable $e) {
 			error_log('Heatmap scoreAction error: ' . $e->getMessage());
-			echo json_encode([
+			$this->sendJson([
 				'url' => '',
 				'score' => self::BASELINE_TEMP,
 				'cached' => false,
 				'frozen' => false,
 				'error' => 'Score calculation failed',
-			]);
+			], 200);
 		}
 	}
 
@@ -776,11 +783,10 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 
 		$this->view->_layout(null);
-		header('Content-Type: application/json; charset=utf-8');
 
 		try {
 			$items = [];
-			$rawItemsParam = Minz_Request::param('items', '');
+			$rawItemsParam = Minz_Request::param('items', '', true);
 			if (is_string($rawItemsParam) && $rawItemsParam !== '') {
 				$decoded = json_decode($rawItemsParam, true);
 				if (is_array($decoded)) {
@@ -788,6 +794,13 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				}
 			} elseif (is_array($rawItemsParam)) {
 				$items = $rawItemsParam;
+			}
+
+			if (empty($items) && isset($_POST['items']) && is_string($_POST['items'])) {
+				$decoded = json_decode($_POST['items'], true);
+				if (is_array($decoded)) {
+					$items = $decoded;
+				}
 			}
 
 			if (empty($items)) {
@@ -799,8 +812,7 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			}
 
 			if (empty($items)) {
-				echo json_encode(['results' => []]);
-				return;
+				$this->sendJson(['results' => []], 200);
 			}
 
 			$items = array_slice($items, 0, self::MAX_BATCH_ITEMS);
@@ -835,11 +847,10 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 				$results[$key] = $res;
 			}
 
-			echo json_encode(['results' => $results]);
+			$this->sendJson(['results' => $results], 200);
 		} catch (Throwable $e) {
 			error_log('Heatmap scoresAction error: ' . $e->getMessage());
-			http_response_code(500);
-			echo json_encode(['error' => 'Batch calculation failed']);
+			$this->sendJson(['error' => 'Batch calculation failed'], 500);
 		}
 	}
 }

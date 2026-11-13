@@ -124,6 +124,12 @@ const flushBatchQueue = () => {
     batchTimer = null;
     if (batchQueue.length === 0) return;
 
+    const csrfToken = getCsrfToken();
+    if (!csrfToken && document.readyState === 'loading') {
+        batchTimer = setTimeout(flushBatchQueue, 50);
+        return;
+    }
+
     const chunk = batchQueue.splice(0, BATCH_CHUNK_SIZE);
     if (batchQueue.length > 0) {
         batchTimer = setTimeout(flushBatchQueue, BATCH_DEBOUNCE_MS);
@@ -144,7 +150,6 @@ const flushBatchQueue = () => {
         });
     });
 
-    const csrfToken = getCsrfToken();
     const bodyParams = new URLSearchParams();
     bodyParams.append('_csrf', csrfToken);
     bodyParams.append('items', JSON.stringify(itemsPayload));
@@ -158,9 +163,16 @@ const flushBatchQueue = () => {
         },
         body: bodyParams.toString()
     })
-        .then((response) => {
-            if (!response.ok) throw new Error('HTTP ' + response.status);
-            return response.json();
+        .then(async (response) => {
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${text.slice(0, 120)}`);
+            }
+            try {
+                return JSON.parse(text);
+            } catch (parseErr) {
+                throw new Error(`Invalid JSON: ${text.slice(0, 120)}`);
+            }
         })
         .then((data) => {
             const results = (data && data.results && typeof data.results === 'object') ? data.results : {};
@@ -227,9 +239,12 @@ const forceRecalculateBadge = (badge) => {
     const fetchUrl = `?c=heatmap&a=score&url=${encodeURIComponent(url)}&pubdate=${pubdate}&title=${encodeURIComponent(title)}&force=1`;
 
     fetch(fetchUrl, { credentials: 'same-origin' })
-        .then((response) => {
-            if (!response.ok) throw new Error('HTTP ' + response.status);
-            return response.json();
+        .then(async (response) => {
+            const text = await response.text();
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${text.slice(0, 120)}`);
+            }
+            return JSON.parse(text);
         })
         .then((data) => {
             if (data && data.score !== undefined) {
