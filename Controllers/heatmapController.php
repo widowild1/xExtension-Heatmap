@@ -3,7 +3,7 @@
 class FreshExtension_heatmap_Controller extends Minz_ActionController {
 
 	private const MAX_BATCH_ITEMS = 50;
-	private const MAX_UNCACHED_PER_BATCH = 15;
+	private const MAX_UNCACHED_PER_BATCH = 8;
 	private const BASELINE_TEMP = 98.6;
 	private const SCALE_FACTOR = 1.25;
 
@@ -98,8 +98,14 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		while (ob_get_level() > 0) {
 			@ob_end_clean();
 		}
+
+		if ($this->view !== null) {
+			$this->view->_layout(null);
+		}
+
 		http_response_code($statusCode);
 		header('Content-Type: application/json; charset=utf-8');
+
 		echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 		exit;
 	}
@@ -750,8 +756,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			return;
 		}
 
-		$this->view->_layout(null);
-
 		try {
 			$rawUrl = (string)Minz_Request::param('url', '', true);
 			$rawTitle = (string)Minz_Request::param('title', '', true);
@@ -781,8 +785,6 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			Minz_Error::error(403);
 			return;
 		}
-
-		$this->view->_layout(null);
 
 		try {
 			$items = [];
