@@ -1,0 +1,14 @@
+# Protection DLP & Données locales
+.env
+.env.*
+*.local.json
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.pem
+*.key
+*.log
+cache/
+.DS_Store
