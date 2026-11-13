@@ -94,6 +94,21 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 	}
 
+	private function getUserConfValue(string $key, $default = null) {
+		$conf = FreshRSS_Context::$user_conf;
+		if ($conf === null) {
+			return $default;
+		}
+		if (method_exists($conf, 'has')) {
+			return $conf->has($key) ? $conf->$key : $default;
+		}
+		if (method_exists($conf, 'attribute')) {
+			$val = $conf->attribute($key);
+			return $val !== null ? $val : $default;
+		}
+		return $default;
+	}
+
 	private function isValidHttpUrl(string $url): bool {
 		if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false) {
 			return false;
@@ -408,24 +423,23 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 			];
 		}
 
-		$userConf = FreshRSS_Context::$user_conf;
-		$enableHN = (bool)($userConf->heatmap_enable_hn ?? true);
-		$enableReddit = (bool)($userConf->heatmap_enable_reddit ?? true);
-		$enableSearx = (bool)($userConf->heatmap_enable_searxng ?? true);
-		$enableHister = (bool)($userConf->heatmap_enable_hister ?? false);
-		$enableBsky = (bool)($userConf->heatmap_enable_bsky ?? true);
-		$enableWikipedia = (bool)($userConf->heatmap_enable_wikipedia ?? true);
-		$enableLobsters = (bool)($userConf->heatmap_enable_lobsters ?? true);
-		$enableLemmy = (bool)($userConf->heatmap_enable_lemmy ?? false);
-		$enableWayback = (bool)($userConf->heatmap_enable_wayback ?? true);
-		$enableGithub = (bool)($userConf->heatmap_enable_github ?? false);
+		$enableHN = (bool)$this->getUserConfValue('heatmap_enable_hn', true);
+		$enableReddit = (bool)$this->getUserConfValue('heatmap_enable_reddit', true);
+		$enableSearx = (bool)$this->getUserConfValue('heatmap_enable_searxng', true);
+		$enableHister = (bool)$this->getUserConfValue('heatmap_enable_hister', false);
+		$enableBsky = (bool)$this->getUserConfValue('heatmap_enable_bsky', true);
+		$enableWikipedia = (bool)$this->getUserConfValue('heatmap_enable_wikipedia', true);
+		$enableLobsters = (bool)$this->getUserConfValue('heatmap_enable_lobsters', true);
+		$enableLemmy = (bool)$this->getUserConfValue('heatmap_enable_lemmy', false);
+		$enableWayback = (bool)$this->getUserConfValue('heatmap_enable_wayback', true);
+		$enableGithub = (bool)$this->getUserConfValue('heatmap_enable_github', false);
 
-		$searxBaseUrl = trim((string)($userConf->heatmap_searxng_url ?? ''));
-		$histerBaseUrl = trim((string)($userConf->heatmap_hister_url ?? ''));
-		$histerToken = trim((string)($userConf->heatmap_hister_token ?? ''));
-		$githubToken = trim((string)($userConf->heatmap_github_token ?? ''));
+		$searxBaseUrl = trim((string)$this->getUserConfValue('heatmap_searxng_url', ''));
+		$histerBaseUrl = trim((string)$this->getUserConfValue('heatmap_hister_url', ''));
+		$histerToken = trim((string)$this->getUserConfValue('heatmap_hister_token', ''));
+		$githubToken = trim((string)$this->getUserConfValue('heatmap_github_token', ''));
 
-		$timeout = intval($userConf->heatmap_timeout ?? 3);
+		$timeout = intval($this->getUserConfValue('heatmap_timeout', 3));
 		if ($timeout < 1 || $timeout > 10) {
 			$timeout = 3;
 		}
@@ -816,4 +830,3 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		}
 	}
 }
-

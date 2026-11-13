@@ -41,7 +41,7 @@ class HeatmapExtension extends Minz_Extension {
 
 		Minz_Extension::registerHook('entry_before_display', [$this, 'injectHeatmapUI']);
 
-		if ($conf !== null && ($conf->heatmap_enable_precalc ?? true)) {
+		if ($this->getConfigValue('heatmap_enable_precalc', true)) {
 			Minz_Extension::registerHook('entry_before_insert', [$this, 'precalculateScore']);
 		}
 
@@ -50,6 +50,21 @@ class HeatmapExtension extends Minz_Extension {
 
 		Minz_View::appendScript($this->getFileUrl('heatmap.js', 'js'));
 		Minz_View::appendStyle($this->getFileUrl('heatmap.css', 'css'));
+	}
+
+	public function getConfigValue(string $key, $default = null) {
+		$conf = FreshRSS_Context::$user_conf;
+		if ($conf === null) {
+			return $default;
+		}
+		if (method_exists($conf, 'has')) {
+			return $conf->has($key) ? $conf->$key : $default;
+		}
+		if (method_exists($conf, 'attribute')) {
+			$val = $conf->attribute($key);
+			return $val !== null ? $val : $default;
+		}
+		return $default;
 	}
 
 	public function precalculateScore($entry) {
@@ -136,7 +151,7 @@ class HeatmapExtension extends Minz_Extension {
 		$i18nHtml = '';
 		if (!$i18nInjected) {
 			$i18nInjected = true;
-			$unit = FreshRSS_Context::$user_conf->heatmap_unit ?? 'F';
+			$unit = (string)$this->getConfigValue('heatmap_unit', 'F');
 			$i18n = [
 				'sortByHeat' => _t('ext.heatmap.sort_by_heat'),
 				'sorted' => _t('ext.heatmap.sorted'),
