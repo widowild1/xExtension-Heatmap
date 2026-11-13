@@ -145,16 +145,18 @@ const flushBatchQueue = () => {
     });
 
     const csrfToken = getCsrfToken();
-    const fetchUrl = `?c=heatmap&a=scores&_csrf=${encodeURIComponent(csrfToken)}`;
+    const bodyParams = new URLSearchParams();
+    bodyParams.append('_csrf', csrfToken);
+    bodyParams.append('items', JSON.stringify(itemsPayload));
 
-    fetch(fetchUrl, {
+    fetch('?c=heatmap&a=scores', {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'Accept': 'application/json'
         },
-        body: JSON.stringify({ items: itemsPayload })
+        body: bodyParams.toString()
     })
         .then((response) => {
             if (!response.ok) throw new Error('HTTP ' + response.status);

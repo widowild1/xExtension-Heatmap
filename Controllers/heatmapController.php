@@ -779,11 +779,24 @@ class FreshExtension_heatmap_Controller extends Minz_ActionController {
 		header('Content-Type: application/json; charset=utf-8');
 
 		try {
-			$rawBody = file_get_contents('php://input');
-			$payload = is_string($rawBody) && $rawBody !== '' ? json_decode($rawBody, true) : null;
-			$items = is_array($payload) && isset($payload['items']) && is_array($payload['items'])
-				? $payload['items']
-				: [];
+			$items = [];
+			$rawItemsParam = Minz_Request::param('items', '');
+			if (is_string($rawItemsParam) && $rawItemsParam !== '') {
+				$decoded = json_decode($rawItemsParam, true);
+				if (is_array($decoded)) {
+					$items = $decoded;
+				}
+			} elseif (is_array($rawItemsParam)) {
+				$items = $rawItemsParam;
+			}
+
+			if (empty($items)) {
+				$rawBody = file_get_contents('php://input');
+				$payload = is_string($rawBody) && $rawBody !== '' ? json_decode($rawBody, true) : null;
+				if (is_array($payload) && isset($payload['items']) && is_array($payload['items'])) {
+					$items = $payload['items'];
+				}
+			}
 
 			if (empty($items)) {
 				echo json_encode(['results' => []]);
