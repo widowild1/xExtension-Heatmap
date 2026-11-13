@@ -24,18 +24,26 @@ class HeatmapExtension extends Minz_Extension {
 		'heatmap_unit' => 'F',
 	];
 
-	public function init(): void {
+	public function init() {
 		$this->registerTranslates();
-		$this->setDefaultUserConfiguration(self::$defaults);
+
+		$conf = FreshRSS_Context::$user_conf;
+		if ($conf !== null) {
+			foreach (self::$defaults as $key => $defaultVal) {
+				if (!isset($conf->$key)) {
+					$conf->$key = $defaultVal;
+				}
+			}
+		}
 
 		Minz_Extension::registerHook('entry_before_display', [$this, 'injectHeatmapUI']);
 
-		$conf = FreshRSS_Context::$user_conf;
-		if (!empty($conf) && ($conf->heatmap_enable_precalc ?? true)) {
+		if ($conf !== null && ($conf->heatmap_enable_precalc ?? true)) {
 			Minz_Extension::registerHook('entry_before_insert', [$this, 'precalculateScore']);
 		}
 
 		$this->registerController('heatmap');
+		$this->registerController('Heatmap');
 
 		Minz_View::appendScript($this->getFileUrl('heatmap.js', 'js'));
 		Minz_View::appendStyle($this->getFileUrl('heatmap.css', 'css'));
@@ -72,17 +80,17 @@ class HeatmapExtension extends Minz_Extension {
 		return $entry;
 	}
 
-	public function handleConfigureAction(): void {
+	public function handleConfigureAction() {
 		$this->registerTranslates();
 
 		if (Minz_Request::isPost()) {
-			$searxUrl = rtrim(trim(Minz_Request::param('searxng_url', '')), '/');
-			$histerUrl = rtrim(trim(Minz_Request::param('hister_url', '')), '/');
+			$searxUrl = rtrim(trim((string)Minz_Request::param('searxng_url', '')), '/');
+			$histerUrl = rtrim(trim((string)Minz_Request::param('hister_url', '')), '/');
 
 			FreshRSS_Context::$user_conf->heatmap_searxng_url = $this->sanitizeHttpUrl($searxUrl);
 			FreshRSS_Context::$user_conf->heatmap_hister_url = $this->sanitizeHttpUrl($histerUrl);
-			FreshRSS_Context::$user_conf->heatmap_hister_token = trim(Minz_Request::param('hister_token', ''));
-			FreshRSS_Context::$user_conf->heatmap_github_token = trim(Minz_Request::param('github_token', ''));
+			FreshRSS_Context::$user_conf->heatmap_hister_token = trim((string)Minz_Request::param('hister_token', ''));
+			FreshRSS_Context::$user_conf->heatmap_github_token = trim((string)Minz_Request::param('github_token', ''));
 
 			FreshRSS_Context::$user_conf->heatmap_enable_precalc = (bool)Minz_Request::param('enable_precalc', 0);
 			FreshRSS_Context::$user_conf->heatmap_enable_hister = (bool)Minz_Request::param('enable_hister', 0);
@@ -99,7 +107,7 @@ class HeatmapExtension extends Minz_Extension {
 			$timeout = intval(Minz_Request::param('timeout', 3));
 			FreshRSS_Context::$user_conf->heatmap_timeout = ($timeout >= 1 && $timeout <= 10) ? $timeout : 3;
 
-			$unit = Minz_Request::param('temp_unit', 'F');
+			$unit = (string)Minz_Request::param('temp_unit', 'F');
 			FreshRSS_Context::$user_conf->heatmap_unit = ($unit === 'C') ? 'C' : 'F';
 
 			FreshRSS_Context::$user_conf->save();
